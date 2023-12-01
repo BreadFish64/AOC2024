@@ -1,0 +1,1 @@
+void AocMain(std::string input) {}

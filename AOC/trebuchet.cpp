@@ -35,7 +35,7 @@ ptrdiff_t Parse2(std::string_view calibrationValue) {
 } // namespace
 
 void AocMain(std::string input) {
-    const auto calibrationValues = input | Split | ranges::to<std::vector>;
+    const auto calibrationValues = input | SplitWs | ranges::to<std::vector>;
     fmt::print("Part 1: {}\n", ranges::accumulate(calibrationValues, ptrdiff_t{}, std::plus{}, Parse1));
     fmt::print("Part 2: {}\n", ranges::accumulate(calibrationValues, ptrdiff_t{}, std::plus{}, Parse2));
 }

@@ -34,3 +34,7 @@ endfunction()
 
 Problem(chronal_calibration)
 Problem(trebuchet)
+Problem(cube_conundrum)
+Problem(gear_ratios)
+Problem(scratchcards)
+Problem(if_you_give_a_seed_a_fertilizer)

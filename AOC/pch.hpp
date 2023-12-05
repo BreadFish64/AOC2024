@@ -16,6 +16,7 @@
 #include <memory>
 #include <numeric>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <span>
 #include <string>
@@ -28,6 +29,7 @@
 #include <boost/container/flat_set.hpp>
 #include <boost/container/small_vector.hpp>
 #include <boost/container/static_vector.hpp>
+#include <boost/icl/interval_map.hpp>
 #include <boost/preprocessor.hpp>
 #include <boost/unordered/unordered_flat_map.hpp>
 #include <boost/unordered/unordered_flat_set.hpp>
@@ -160,20 +162,41 @@ constexpr bool IsGraph(char c) {
     return c >= 33 && c <= 126;
 }
 
+constexpr bool IsNotGraph(char c) {
+    return !IsGraph(c);
+}
+
 constexpr bool IsDigit(char c) {
     return c >= (int)'0' && c <= (int)'9';
 }
 
-constexpr auto ChunkToStringView = views::transform([](ranges::random_access_range auto&& chunk) {
+constexpr bool IsAlpha(char c) {
+    return (c >= (int)'A' && c <= (int)'Z') || (c >= (int)'a' && c <= (int)'z');
+}
+
+constexpr bool IsAlNum(char c) {
+    return IsDigit(c) || IsAlpha(c);
+}
+
+constexpr bool IsPunct(char c) {
+    return IsGraph(c) && !IsAlNum(c);
+}
+
+constexpr auto ChunkToStringView = views::transform([](auto&& chunk) {
     return std::string_view{&*ranges::begin(chunk), static_cast<std::size_t>(ranges::distance(chunk))};
 });
 
-constexpr auto Split =
+constexpr auto SplitWs =
+    views::drop_while(IsNotGraph) |
     views::split_when([](ranges::bidirectional_iterator auto begin, ranges::bidirectional_iterator auto end) {
         auto whitespace_end = std::find_if(begin, end, IsGraph);
         return std::make_pair(begin != whitespace_end, whitespace_end);
     }) |
     ChunkToStringView;
+
+constexpr auto Split(const auto& c) {
+    return views::split(c) | ChunkToStringView;
+}
 
 inline void ThrowErrc(std::errc errc) {
     throw std::runtime_error{std::make_error_condition(errc).message()};
@@ -181,7 +204,7 @@ inline void ThrowErrc(std::errc errc) {
 
 template <typename T>
 constexpr auto ParseNumbers =
-    Split | views::transform([](std::string_view str) {
+    SplitWs | views::transform([](std::string_view str) {
         T val{};
         if (str.front() == '+') str.remove_prefix(1);
         if (const std::from_chars_result result = std::from_chars(str.data(), str.data() + str.size(), val);
@@ -190,6 +213,22 @@ constexpr auto ParseNumbers =
         }
         return val;
     });
+
+template <>
+struct fmt::formatter<boost::icl::right_open_interval<s64>> : fmt::formatter<s64> {
+    // parse is inherited from formatter<string_view>.
+
+    auto format(boost::icl::right_open_interval<s64> seedRange, format_context& ctx) const {
+        auto it = ctx.out();
+        *it++   = '[';
+        it      = fmt::formatter<s64>::format(seedRange.lower(), ctx);
+        *it++   = ',';
+        *it++   = ' ';
+        it      = fmt::formatter<s64>::format(seedRange.upper(), ctx);
+        *it++   = ')';
+        return it;
+    }
+};
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 

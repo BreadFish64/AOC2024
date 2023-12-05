@@ -34,7 +34,7 @@ void Part2(std::span<const s64> seeds, std::span<const Map> maps) {
             SparseSeedRange leftovers;
             for (const auto& [srcInterval, dstStart] : ranges::subrange(beginDst, endDst)) {
                 const auto srcSeedInterval = srcInterval & sourceSeedRange;
-                leftovers.insert(srcSeedInterval);
+                leftovers.insert(leftovers.end(), srcSeedInterval);
                 SeedRange dstSeedInterval{srcSeedInterval.lower() - srcInterval.lower() + dstStart,
                                           srcSeedInterval.upper() - srcInterval.lower() + dstStart};
                 dstSeeds.insert(dstSeedInterval);

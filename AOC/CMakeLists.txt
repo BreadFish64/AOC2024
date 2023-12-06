@@ -8,6 +8,7 @@ add_library(common_pch
     pch.cpp
 )
 target_link_libraries(common_pch PUBLIC fmt::fmt range-v3 Boost::boost std::mdspan Eigen3::Eigen Microsoft.GSL::GSL)
+target_compile_options(common_pch PUBLIC /utf-8)
 target_precompile_headers(common_pch PUBLIC pch.hpp)
 
 function(Problem problem_name)

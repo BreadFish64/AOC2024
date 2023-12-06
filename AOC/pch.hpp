@@ -30,42 +30,40 @@
 #include <boost/container/small_vector.hpp>
 #include <boost/container/static_vector.hpp>
 #include <boost/icl/interval_map.hpp>
-#include <boost/preprocessor.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
 #include <boost/unordered/unordered_flat_map.hpp>
 #include <boost/unordered/unordered_flat_set.hpp>
 
 #include <Eigen/Dense>
 
 #include <fmt/chrono.h>
+#include <fmt/color.h>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
-
-#ifndef __CUDACC__
-#include <boost/multiprecision/cpp_int.hpp>
-using u128 = boost::multiprecision::uint128_t;
-using s128 = boost::multiprecision::int128_t;
 
 #include <fmt/ostream.h>
 
 #include <experimental/mdspan>
 
 #include <range/v3/all.hpp>
-namespace views = ranges::views;
 
 #include <immintrin.h>
-#endif
+
+namespace views = ranges::views;
 
 using namespace std::literals;
 
-using u8  = std::uint8_t;
-using u16 = std::uint16_t;
-using u32 = std::uint32_t;
-using u64 = std::uint64_t;
+using u8   = std::uint8_t;
+using u16  = std::uint16_t;
+using u32  = std::uint32_t;
+using u64  = std::uint64_t;
+using u128 = boost::multiprecision::uint128_t;
 
-using s8  = std::int8_t;
-using s16 = std::int16_t;
-using s32 = std::int32_t;
-using s64 = std::int64_t;
+using s8   = std::int8_t;
+using s16  = std::int16_t;
+using s32  = std::int32_t;
+using s64  = std::int64_t;
+using s128 = boost::multiprecision::int128_t;
 
 using f32 = float;
 using f64 = double;
@@ -112,7 +110,6 @@ T sign(T val) {
     return (T(0) < val) - (val < T(0));
 }
 
-#ifndef __CUDACC__
 inline std::bitset<8> rotr(std::bitset<8> x, int s) {
     return std::rotr(static_cast<u8>(x.to_ulong()), s);
 }
@@ -137,26 +134,6 @@ inline std::bitset<64> rotr(std::bitset<64> x, int s) {
 inline std::bitset<64> rotl(std::bitset<64> x, int s) {
     return std::rotl(static_cast<u64>(x.to_ullong()), s);
 }
-#endif
-
-#define VARIADIC_MAP(r, macro, i, elem) BOOST_PP_COMMA_IF(i) macro(elem)
-#define __SCANNER_PASTE_VAL(member) val.member
-#define SCANNER(T, fmt, ...)                                                                                           \
-    template <>                                                                                                        \
-    struct scn::scanner<T> : scn::empty_parser {                                                                       \
-        template <typename Context>                                                                                    \
-        error scan(T& val, Context& ctx) {                                                                             \
-            return scn::scan_usertype(                                                                                 \
-                ctx, (fmt),                                                                                            \
-                BOOST_PP_SEQ_FOR_EACH_I(VARIADIC_MAP, __SCANNER_PASTE_VAL, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__)));    \
-        }                                                                                                              \
-    };
-
-#ifdef _MSC_VER
-#define UB() __assume(false)
-#else
-#define UB() __builtin_unreachable()
-#endif
 
 constexpr bool IsGraph(char c) {
     return c >= 33 && c <= 126;
@@ -230,15 +207,109 @@ struct fmt::formatter<boost::icl::right_open_interval<s64>> : fmt::formatter<s64
     }
 };
 
+class Logger {
+    using TypeErasedLogLine = std::move_only_function<void() const>;
+
+    template <typename... Args>
+    struct LogLine {
+        fmt::text_style storedStyle;
+        fmt::string_view storedFmt;
+        std::tuple<Args...> storedArgs;
+
+        explicit LogLine(const fmt::text_style& style, fmt::format_string<Args...> fmt, const Args&... args)
+            : storedStyle{style}, storedFmt{fmt}, storedArgs{std::make_tuple(args...)} {}
+
+        void operator()() const {
+            auto printArgs = [this](const auto&... unpackedArgs) {
+                fmt::vprint(stdout, storedStyle, storedFmt, fmt::make_format_args(unpackedArgs...));
+            };
+            std::apply(printArgs, storedArgs);
+            std::putc('\n', stdout);
+        }
+    };
+    std::mutex logLinesMutex;
+    std::vector<TypeErasedLogLine> logLines;
+
+    template <typename... Args>
+    void addLogline(const fmt::text_style& style, fmt::format_string<Args...> fmt, const Args&... args) {
+        const std::lock_guard logLinesLock{logLinesMutex};
+        logLines.emplace_back(std::in_place_type<LogLine<Args...>>, style, fmt, args...);
+    }
+
+public:
+    Logger() { logLines.reserve(128); }
+
+    void flush() {
+        std::vector<TypeErasedLogLine> flushedLines;
+        {
+            const std::lock_guard logLinesLock{logLinesMutex};
+            logLines.swap(flushedLines);
+        }
+        for (const auto& logLine : flushedLines) {
+            logLine();
+        }
+    }
+
+    template <typename... Args>
+    void info(fmt::format_string<Args...> fmt, const Args&... args) {
+        addLogline({}, fmt, args...);
+    }
+
+    template <typename... Args>
+    void perf(fmt::format_string<Args...> fmt, const Args&... args) {
+        addLogline(fmt::fg(fmt::color::cyan), fmt, args...);
+    }
+
+    template <typename... Args>
+    void solution(fmt::format_string<Args...> fmt, const Args&... args) {
+        addLogline(fmt::fg(fmt::color::lime), fmt, args...);
+    }
+};
+
+inline Logger logger;
+
+template <typename Ratio = std::milli>
+struct StopWatch {
+    const std::string sectionName;
+    const std::chrono::steady_clock::time_point start;
+
+    explicit StopWatch(std::string sectionName)
+        : sectionName{std::move(sectionName)}, start{std::chrono::steady_clock::now()} {}
+
+    ~StopWatch() {
+        const auto stop = std::chrono::steady_clock::now();
+        const std::chrono::duration<double, Ratio> duration{stop - start};
+        logger.perf("{} took {}", sectionName, duration);
+    }
+
+    template <typename... Args, std::invocable<Args...> Function>
+    static auto Run(std::string sectionName, Function&& function, Args&&... args) {
+        StopWatch runStopWatch{std::move(sectionName)};
+        return std::invoke(std::forward<Function>(function), std::forward<Args>(args)...);
+    }
+};
+
+inline std::string LoadInput() {
+    StopWatch loadInput{"LoadInput"};
+    std::ifstream input_file{"input.txt", std::ios::binary};
+    return {std::istreambuf_iterator{input_file}, {}};
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-void AocMain(std::string input);
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <Windows.h>
+
+void AocMain(std::string_view input);
 
 int main(const int argc, const char* argv[]) {
-    std::ifstream input_file{"input.txt", std::ios::binary};
-    std::string input{std::istreambuf_iterator{input_file}, {}};
-    auto start = std::chrono::steady_clock::now();
-    AocMain(std::move(input));
-    auto end = std::chrono::steady_clock::now();
-    fmt::print("Solved in {}\n", std::chrono::duration<double, std::milli>{end - start});
+    {
+        StopWatch wholeProgramStopWatch{"Whole Program"};
+        SetConsoleCP(CP_UTF8);
+        SetConsoleOutputCP(CP_UTF8);
+        std::string input = LoadInput();
+        StopWatch<std::milli>::Run("AocMain", AocMain, std::move(input));
+    }
+    logger.flush();
 }

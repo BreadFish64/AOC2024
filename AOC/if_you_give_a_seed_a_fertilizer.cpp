@@ -5,7 +5,7 @@ using SparseSeedRange = boost::icl::interval_set<s64, std::less, SeedRange>;
 
 namespace {
 
-void Part1(std::span<const s64> seeds, std::span<const Map> maps) {
+s64 Part1(std::span<const s64> seeds, std::span<const Map> maps) {
     std::vector<s64> locations{seeds.begin(), seeds.end()};
     for (const Map& map : maps) {
         for (s64& location : locations) {
@@ -16,10 +16,10 @@ void Part1(std::span<const s64> seeds, std::span<const Map> maps) {
             }
         }
     }
-    fmt::print("Part 1: {}\n", ranges::min(locations));
+    return ranges::min(locations);
 }
 
-void Part2(std::span<const s64> seeds, std::span<const Map> maps) {
+s64 Part2(std::span<const s64> seeds, std::span<const Map> maps) {
     SparseSeedRange sourceSeeds;
     for (auto seedBound = seeds.begin(); seedBound != seeds.end();) {
         s64 start  = *seedBound++;
@@ -39,11 +39,12 @@ void Part2(std::span<const s64> seeds, std::span<const Map> maps) {
                                           srcSeedInterval.upper() - srcInterval.lower() + dstStart};
                 dstSeeds.insert(dstSeedInterval);
             }
-            dstSeeds += leftovers ^ sourceSeedRange;
+            leftovers ^= sourceSeedRange;
+            dstSeeds += leftovers;
         }
         sourceSeeds = std::move(dstSeeds);
     }
-    fmt::print("Part 2: {}\n", sourceSeeds.begin()->lower());
+    return sourceSeeds.begin()->lower();
 }
 
 Map::segment_type ParseMapLine(std::string_view map_line) {
@@ -51,9 +52,7 @@ Map::segment_type ParseMapLine(std::string_view map_line) {
     return Map::segment_type{Map::interval_type{nums[1], nums[1] + nums[2]}, nums[0]};
 }
 
-} // namespace
-
-void AocMain(std::string input) {
+std::tuple<std::vector<s64>, std::vector<Map>> Parse(std::string_view input) {
     const auto lines      = input | Split('\n');
     auto seeds            = ranges::front(lines) | views::drop(7) | ParseNumbers<s64> | ranges::to<std::vector>;
     std::vector<Map> maps = lines | views::drop(2) | views::split(""sv) | views::transform([](const auto& map_lines) {
@@ -64,6 +63,13 @@ void AocMain(std::string input) {
                                 return map;
                             }) |
                             ranges::to<std::vector>;
-    Part1(seeds, maps);
-    Part2(seeds, maps);
+    return std::make_tuple(std::move(seeds), std::move(maps));
+}
+
+} // namespace
+
+void AocMain(std::string_view input) {
+    const auto [seeds, maps] = StopWatch<std::micro>::Run("Parse", Parse, input);
+    logger.solution("Part 1: {}", StopWatch<std::micro>::Run("Part1", Part1, seeds, maps));
+    logger.solution("Part 2: {}", StopWatch<std::micro>::Run("Part2", Part2, seeds, maps));
 }

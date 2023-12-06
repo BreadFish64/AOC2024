@@ -1,3 +1,5 @@
+#include "icl.hpp"
+
 using SeedRange = boost::icl::right_open_interval<s64>;
 using Map = boost::icl::interval_map<s64, s64, boost::icl::partial_enricher, std::less, boost::icl::inplace_identity,
                                      boost::icl::inter_section, SeedRange>;

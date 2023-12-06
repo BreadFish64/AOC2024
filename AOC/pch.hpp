@@ -29,7 +29,6 @@
 #include <boost/container/flat_set.hpp>
 #include <boost/container/small_vector.hpp>
 #include <boost/container/static_vector.hpp>
-#include <boost/icl/interval_map.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/unordered/unordered_flat_map.hpp>
 #include <boost/unordered/unordered_flat_set.hpp>
@@ -46,6 +45,8 @@
 #include <experimental/mdspan>
 
 #include <range/v3/all.hpp>
+
+#include <mio/mmap.hpp>
 
 #include <immintrin.h>
 
@@ -110,6 +111,15 @@ T sign(T val) {
     return (T(0) < val) - (val < T(0));
 }
 
+inline std::tuple<double, double> SolveQuadratic(double a, double b, double c) {
+    double radical = std::sqrt(b * b - 4 * a * c);
+    double r2a     = 1.0 / (2.0 * a);
+    double lower   = (-b - radical) * r2a;
+    double upper   = (-b + radical) * r2a;
+    if (lower > upper) std::swap(lower, upper);
+    return {lower, upper};
+}
+
 inline std::bitset<8> rotr(std::bitset<8> x, int s) {
     return std::rotr(static_cast<u8>(x.to_ulong()), s);
 }
@@ -147,6 +157,10 @@ constexpr bool IsDigit(char c) {
     return c >= (int)'0' && c <= (int)'9';
 }
 
+constexpr bool IsNotDigit(char c) {
+    return !IsDigit(c);
+}
+
 constexpr bool IsAlpha(char c) {
     return (c >= (int)'A' && c <= (int)'Z') || (c >= (int)'a' && c <= (int)'z');
 }
@@ -180,32 +194,18 @@ inline void ThrowErrc(std::errc errc) {
 }
 
 template <typename T>
-constexpr auto ParseNumbers =
-    SplitWs | views::transform([](std::string_view str) {
-        T val{};
-        if (str.front() == '+') str.remove_prefix(1);
-        if (const std::from_chars_result result = std::from_chars(str.data(), str.data() + str.size(), val);
-            result.ec != std::errc{}) [[unlikely]] {
-            ThrowErrc(result.ec);
-        }
-        return val;
-    });
-
-template <>
-struct fmt::formatter<boost::icl::right_open_interval<s64>> : fmt::formatter<s64> {
-    // parse is inherited from formatter<string_view>.
-
-    auto format(boost::icl::right_open_interval<s64> seedRange, format_context& ctx) const {
-        auto it = ctx.out();
-        *it++   = '[';
-        it      = fmt::formatter<s64>::format(seedRange.lower(), ctx);
-        *it++   = ',';
-        *it++   = ' ';
-        it      = fmt::formatter<s64>::format(seedRange.upper(), ctx);
-        *it++   = ')';
-        return it;
+inline T ParseNumber(std::string_view str) {
+    T val{};
+    if (str.front() == '+') str.remove_prefix(1);
+    if (const std::from_chars_result result = std::from_chars(str.data(), str.data() + str.size(), val);
+        result.ec != std::errc{}) [[unlikely]] {
+        ThrowErrc(result.ec);
     }
-};
+    return val;
+}
+
+template <typename T>
+constexpr auto ParseNumbers = SplitWs | views::transform(ParseNumber<T>);
 
 class Logger {
     using TypeErasedLogLine = std::move_only_function<void() const>;
@@ -213,15 +213,15 @@ class Logger {
     template <typename... Args>
     struct LogLine {
         fmt::text_style storedStyle;
-        fmt::string_view storedFmt;
+        fmt::format_string<Args...> storedFmt;
         std::tuple<Args...> storedArgs;
 
         explicit LogLine(const fmt::text_style& style, fmt::format_string<Args...> fmt, const Args&... args)
             : storedStyle{style}, storedFmt{fmt}, storedArgs{std::make_tuple(args...)} {}
 
         void operator()() const {
-            auto printArgs = [this](const auto&... unpackedArgs) {
-                fmt::vprint(stdout, storedStyle, storedFmt, fmt::make_format_args(unpackedArgs...));
+            auto printArgs = [this](const Args&... unpackedArgs) {
+                fmt::print(stdout, storedStyle, storedFmt.get(), unpackedArgs...);
             };
             std::apply(printArgs, storedArgs);
             std::putc('\n', stdout);
@@ -289,10 +289,10 @@ struct StopWatch {
     }
 };
 
-inline std::string LoadInput() {
-    StopWatch loadInput{"LoadInput"};
-    std::ifstream input_file{"input.txt", std::ios::binary};
-    return {std::istreambuf_iterator{input_file}, {}};
+inline const std::string INPUT_FILE_NAME{"input.txt"s};
+
+inline auto LoadInput() {
+    return mio::mmap_source{INPUT_FILE_NAME};
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -306,10 +306,11 @@ void AocMain(std::string_view input);
 int main(const int argc, const char* argv[]) {
     {
         StopWatch wholeProgramStopWatch{"Whole Program"};
+        SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
         SetConsoleCP(CP_UTF8);
         SetConsoleOutputCP(CP_UTF8);
-        std::string input = LoadInput();
-        StopWatch<std::milli>::Run("AocMain", AocMain, std::move(input));
+        const auto input = StopWatch<std::micro>::Run("LoadInput", LoadInput);
+        StopWatch<std::milli>::Run("AocMain", AocMain, std::string_view{input});
     }
     logger.flush();
 }

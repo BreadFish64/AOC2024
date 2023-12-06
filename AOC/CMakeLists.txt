@@ -3,11 +3,12 @@ find_package(range-v3      CONFIG REQUIRED)
 find_package(Boost         REQUIRED)
 find_package(Eigen3 3.3    REQUIRED NO_MODULE)
 find_package(Microsoft.GSL CONFIG REQUIRED)
+find_package(mio           CONFIG REQUIRED)
 
 add_library(common_pch
     pch.cpp
 )
-target_link_libraries(common_pch PUBLIC fmt::fmt range-v3 Boost::boost std::mdspan Eigen3::Eigen Microsoft.GSL::GSL)
+target_link_libraries(common_pch PUBLIC fmt::fmt range-v3 Boost::boost std::mdspan Eigen3::Eigen Microsoft.GSL::GSL mio::mio)
 target_compile_options(common_pch PUBLIC /utf-8)
 target_precompile_headers(common_pch PUBLIC pch.hpp)
 
@@ -39,3 +40,4 @@ Problem(cube_conundrum)
 Problem(gear_ratios)
 Problem(scratchcards)
 Problem(if_you_give_a_seed_a_fertilizer)
+Problem(wait_for_it)

@@ -3,7 +3,7 @@ namespace {
 struct Hand {
     static constexpr size_t SIZE = 5;
 
-    enum Strength {
+    enum Strength : u8 {
         HIGH_CARD,
         ONE_PAIR,
         TWO_PAIR,
@@ -13,21 +13,17 @@ struct Hand {
         FIVE_OF_A_KIND,
     };
 
-    std::array<s8, SIZE> cards{};
-    s64 bid{};
+    s16 bid{};
+    std::array<u8, SIZE> cards{};
     Strength strength{};
 
-    friend std::strong_ordering operator<=>(const Hand& lhs, const Hand& rhs) {
-        if (std::strong_ordering relativeHandStrength = lhs.strength <=> rhs.strength;
-            relativeHandStrength != std::strong_ordering::equal) {
-            return relativeHandStrength;
-        }
-        return std::lexicographical_compare_three_way(lhs.cards.begin(), lhs.cards.end(), rhs.cards.begin(),
-                                                      rhs.cards.end());
+    friend std::strong_ordering operator<=>(const Hand lhs, const Hand rhs) {
+        static_assert(std::endian::native == std::endian::little);
+        return std::bit_cast<u64>(lhs) <=> std::bit_cast<u64>(rhs);
     }
 
     template <bool PART2>
-    static s8 CardToNumber(char card) {
+    static u8 CardToNumber(char card) {
         if (IsDigit(card)) {
             return card - '0';
         } else {
@@ -43,20 +39,20 @@ struct Hand {
     }
 
     template <bool PART2>
-    static std::array<s8, SIZE> CardsToNumbers(std::string_view cards) {
-        std::array<s8, SIZE> numbers{};
-        ranges::transform(cards | views::take(SIZE), numbers.begin(), CardToNumber<PART2>);
+    static std::array<u8, SIZE> CardsToNumbers(std::string_view cards) {
+        std::array<u8, SIZE> numbers{}; // Reverse to form single little endian number
+        ranges::transform(cards | views::take(SIZE), numbers.rbegin(), CardToNumber<PART2>);
         return numbers;
     }
 
     template <bool PART2>
-    static Strength CalculateHandStrength(std::span<const s8, SIZE> cards) {
-        std::array<s8, 15> cardCounts{};
-        for (const s8 card : cards)
+    static Strength CalculateHandStrength(std::span<const u8, SIZE> cards) {
+        std::array<u8, 15> cardCounts{};
+        for (const u8 card : cards)
             ++cardCounts[card];
 
-        std::array<s8, 6> ofAKindCounts{};
-        for (const s8 kind : cardCounts | views::drop(2))
+        std::array<u8, SIZE + 1> ofAKindCounts{};
+        for (const u8 kind : cardCounts | views::drop(2))
             ++ofAKindCounts[kind];
 
         if constexpr (!PART2) {
@@ -93,8 +89,8 @@ struct Hand {
     static Hand Parse(std::string_view handStr) {
         auto split       = handStr.find(' ');
         const auto cards = CardsToNumbers<PART2>(handStr.substr(0, split));
-        return {.cards    = cards,
-                .bid      = ParseNumber<s64>(handStr.substr(split + 1)),
+        return {.bid      = ParseNumber<s16>(handStr.substr(split + 1)),
+                .cards    = cards,
                 .strength = CalculateHandStrength<PART2>(cards)};
     }
 };
@@ -108,7 +104,7 @@ s64 Solve(std::span<Hand> hands) {
     std::sort(hands.begin(), hands.end());
     s64 rank  = 1;
     s64 score = 0;
-    for (const Hand& hand : hands) {
+    for (const Hand hand : hands) {
         score += hand.bid * rank;
         ++rank;
     }
@@ -125,9 +121,9 @@ KTJJT 220
 QQQJA 483
 )"sv;
     for (std::string_view in : {test, input}) {
-        auto hands1 = StopWatch<std::milli>::Run("Parse1", Parse<false>, in);
-        auto hands2 = StopWatch<std::milli>::Run("Parse2", Parse<true>, in);
-        logger.solution("Part 1: {}", StopWatch<std::milli>::Run("Part1", Solve, hands1));
-        logger.solution("Part 2: {}", StopWatch<std::milli>::Run("Part2", Solve, hands2));
+        auto hands1 = StopWatch<std::micro>::Run("Parse1", Parse<false>, in);
+        auto hands2 = StopWatch<std::micro>::Run("Parse2", Parse<true>, in);
+        logger.solution("Part 1: {}", StopWatch<std::micro>::Run("Part1", Solve, hands1));
+        logger.solution("Part 2: {}", StopWatch<std::micro>::Run("Part2", Solve, hands2));
     }
 }

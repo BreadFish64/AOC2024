@@ -59,7 +59,7 @@ struct Hand {
         for (const s8 kind : cardCounts | views::drop(2))
             ++ofAKindCounts[kind];
 
-        if constexpr (PART2) {
+        if constexpr (!PART2) {
             if (ofAKindCounts[5] >= 1) return FIVE_OF_A_KIND;
             if (ofAKindCounts[4] >= 1) return FOUR_OF_A_KIND;
             if (ofAKindCounts[3] >= 1 && ofAKindCounts[2] >= 1) return FULL_HOUSE;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <immintrin.h>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -25,6 +27,15 @@
 #include <unordered_set>
 #include <utility>
 
+#include <experimental/mdspan>
+
+#include <range/v3/all.hpp>
+
+#include <fmt/chrono.h>
+#include <fmt/color.h>
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
 #include <boost/container/small_vector.hpp>
@@ -35,24 +46,14 @@
 
 #include <Eigen/Dense>
 
-#include <fmt/chrono.h>
-#include <fmt/color.h>
-#include <fmt/core.h>
-#include <fmt/ranges.h>
-
-#include <fmt/ostream.h>
-
-#include <experimental/mdspan>
-
-#include <range/v3/all.hpp>
-
 #include <mio/mmap.hpp>
 
-#include <immintrin.h>
+#include <lodepng.h>
 
-namespace views = ranges::views;
+#include "tsc.hpp"
 
 using namespace std::literals;
+namespace views = ranges::views;
 
 using u8   = std::uint8_t;
 using u16  = std::uint16_t;
@@ -111,13 +112,39 @@ T sign(T val) {
     return (T(0) < val) - (val < T(0));
 }
 
-inline std::tuple<double, double> SolveQuadratic(double a, double b, double c) {
-    double radical = std::sqrt(b * b - 4 * a * c);
-    double r2a     = 1.0 / (2.0 * a);
-    double lower   = (-b - radical) * r2a;
-    double upper   = (-b + radical) * r2a;
+template <std::floating_point F = double>
+inline std::tuple<F, F> SolveQuadratic(F a, F b, F c) {
+    F radical = std::sqrt(b * b - 4 * a * c);
+    F r2a     = 1.0 / (2.0 * a);
+    F lower   = (-b - radical) * r2a;
+    F upper   = (-b + radical) * r2a;
     if (lower > upper) std::swap(lower, upper);
     return {lower, upper};
+}
+
+template <std::integral I>
+constexpr I ModularMultiplicativeInverse(I a, I m) {
+    const I m0 = m;
+    I x0 = 0, x1 = 1;
+    if (m0 == 1) return 0;
+    while (a > 1) {
+        I q = a / m;
+        a   = std::exchange(m, a % m);
+        x1  = std::exchange(x0, x1 - q * x0);
+    }
+    if (x1 < 0) x1 += m0;
+    return x1;
+}
+
+template <std::integral I>
+constexpr I ChineseRemainderTheorem(std::span<const I> modulos, std::span<const I> remainders) {
+    const I product = ranges::accumulate(modulos, I{1}, std::multiplies{});
+    I result        = ranges::accumulate(views::zip(modulos, remainders), I{}, std::plus{}, [product](const auto& it) {
+        const auto [modulo, remainder] = it;
+        I pp                           = product / modulo;
+        return remainder * ModularMultiplicativeInverse(pp, modulo) * pp;
+    });
+    return result % product;
 }
 
 inline std::bitset<8> rotr(std::bitset<8> x, int s) {
@@ -154,7 +181,7 @@ constexpr bool IsNotGraph(char c) {
 }
 
 constexpr bool IsDigit(char c) {
-    return c >= (int)'0' && c <= (int)'9';
+    return c >= '0' && c <= '9';
 }
 
 constexpr bool IsNotDigit(char c) {
@@ -162,7 +189,7 @@ constexpr bool IsNotDigit(char c) {
 }
 
 constexpr bool IsAlpha(char c) {
-    return (c >= (int)'A' && c <= (int)'Z') || (c >= (int)'a' && c <= (int)'z');
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 }
 
 constexpr bool IsAlNum(char c) {
@@ -189,39 +216,114 @@ constexpr auto Split(const auto& c) {
     return views::split(c) | ChunkToStringView;
 }
 
-inline void ThrowErrc(std::errc errc) {
+// template <typename Fun>
+// constexpr auto ApplyView(Fun fun) {
+//     return views::transform([mutable fun = std::move(fun)](T&& args) < typename T >
+//                             { return std::apply(fun, std::forward<T>(args)); });
+// }
+
+[[msvc::noinline]] inline void ThrowError(const std::errc errc) {
     throw std::runtime_error{std::make_error_condition(errc).message()};
+}
+
+[[msvc::forceinline]] inline void ThrowOnError(const std::errc errc) {
+    if (errc != std::errc{}) [[unlikely]] {
+        ThrowError(errc);
+    }
+}
+
+[[msvc::forceinline]] inline void ThrowOnError(const std::from_chars_result& result) {
+    ThrowOnError(result.ec);
 }
 
 template <typename T>
 inline T ParseNumber(std::string_view str) {
     T val{};
     if (str.front() == '+') str.remove_prefix(1);
-    if (const std::from_chars_result result = std::from_chars(str.data(), str.data() + str.size(), val);
-        result.ec != std::errc{}) [[unlikely]] {
-        ThrowErrc(result.ec);
-    }
+    ThrowOnError(std::from_chars(str.data(), str.data() + str.size(), val));
     return val;
 }
+
+#pragma region tuple_like_Eigen_Array
+
+template <typename T, int N>
+struct std::tuple_size<Eigen::Array<T, N, 1>> : public integral_constant<std::size_t, N> {};
+
+template <std::size_t I, typename T, int N>
+struct std::tuple_element<I, Eigen::Array<T, N, 1>> {
+    using type = T;
+};
+
+template <std::size_t I, typename T, int N>
+    requires(I < N)
+inline const T& get(const Eigen::Array<T, N, 1>& arr) {
+    return arr[I];
+};
+
+template <std::size_t I, typename T, int N>
+    requires(I < N)
+inline T& get(Eigen::Array<T, N, 1>& arr) {
+    return arr[I];
+};
+
+template <typename T, int N>
+inline std::span<const T, N> ToSpan(const Eigen::Array<T, N, 1>& arr) {
+    return std::span<const T, N>{arr.data(), static_cast<size_t>(arr.size())};
+}
+
+template <typename T, int N>
+inline std::span<T, N> ToSpan(Eigen::Array<T, N, 1>& arr) {
+    return std::span<T, N>{arr.data(), static_cast<size_t>(arr.size())};
+}
+
+#pragma endregion
 
 template <typename T>
 constexpr auto ParseNumbers = SplitWs | views::transform(ParseNumber<T>);
 
+template <typename T>
+concept TupleLike = requires {
+    { std::tuple_size_v<T> } -> std::convertible_to<size_t>;
+};
+
 class Logger {
     using TypeErasedLogLine = std::move_only_function<void() const>;
+
+    template <typename T>
+    static auto CopyRange(T&& obj) {
+        using Value = std::remove_cvref_t<T>;
+        if constexpr (std::convertible_to<T, std::string>) {
+            return std::string(std::forward<T>(obj));
+        } else if constexpr (ranges::range<T>) {
+            using Element = ranges::value_type_t<T>;
+            if constexpr (std::same_as<char, Element>) {
+                return std::string(ranges::begin(obj), ranges::end(obj));
+            } /*else if constexpr (TupleLike<Value>) {
+                return boost::container::static_vector<Element, std::tuple_size_v<Value>>(ranges::begin(obj),
+                                                                                          ranges::end(obj));
+            }*/
+            else {
+                return boost::container::small_vector<Element, 256 / sizeof(Element)>(ranges::begin(obj),
+                                                                                      ranges::end(obj));
+            }
+        } else {
+            return std::forward<T>(obj);
+        }
+    }
 
     template <typename... Args>
     struct LogLine {
         fmt::text_style storedStyle;
-        fmt::format_string<Args...> storedFmt;
-        std::tuple<Args...> storedArgs;
+        fmt::string_view storedFmt;
+        std::tuple<decltype(CopyRange(std::declval<Args>()))...> storedArgs;
 
-        explicit LogLine(const fmt::text_style& style, fmt::format_string<Args...> fmt, const Args&... args)
-            : storedStyle{style}, storedFmt{fmt}, storedArgs{std::make_tuple(args...)} {}
+        explicit LogLine(const fmt::text_style& style, fmt::format_string<Args...> fmt, Args&&... args)
+            : storedStyle{style}, storedFmt{fmt.get()},
+              storedArgs{std::make_tuple(CopyRange(std::forward<Args>(args))...)} {}
 
         void operator()() const {
-            auto printArgs = [this](const Args&... unpackedArgs) {
-                fmt::print(stdout, storedStyle, storedFmt.get(), unpackedArgs...);
+            auto printArgs = [this](const auto&... unpackedArgs) {
+                fmt::vprint(stdout, storedStyle, storedFmt, fmt::make_format_args(unpackedArgs...));
             };
             std::apply(printArgs, storedArgs);
             std::putc('\n', stdout);
@@ -231,54 +333,44 @@ class Logger {
     std::vector<TypeErasedLogLine> logLines;
 
     template <typename... Args>
-    void addLogline(const fmt::text_style& style, fmt::format_string<Args...> fmt, const Args&... args) {
+    void addLogline(const fmt::text_style& style, fmt::format_string<Args...> fmt, Args&&... args) {
         const std::lock_guard logLinesLock{logLinesMutex};
-        logLines.emplace_back(std::in_place_type<LogLine<Args...>>, style, fmt, args...);
+        logLines.emplace_back(std::in_place_type<LogLine<Args...>>, style, fmt, std::forward<Args>(args)...);
     }
 
 public:
-    Logger() { logLines.reserve(128); }
+    explicit Logger();
 
-    void flush() {
-        std::vector<TypeErasedLogLine> flushedLines;
-        {
-            const std::lock_guard logLinesLock{logLinesMutex};
-            logLines.swap(flushedLines);
-        }
-        for (const auto& logLine : flushedLines) {
-            logLine();
-        }
+    void flush();
+
+    template <typename... Args>
+    void info(fmt::format_string<Args...> fmt, Args&&... args) {
+        addLogline({}, fmt, std::forward<Args>(args)...);
     }
 
     template <typename... Args>
-    void info(fmt::format_string<Args...> fmt, const Args&... args) {
-        addLogline({}, fmt, args...);
+    void perf(fmt::format_string<Args...> fmt, Args&&... args) {
+        addLogline(fmt::fg(fmt::color::cyan), fmt, std::forward<Args>(args)...);
     }
 
     template <typename... Args>
-    void perf(fmt::format_string<Args...> fmt, const Args&... args) {
-        addLogline(fmt::fg(fmt::color::cyan), fmt, args...);
-    }
-
-    template <typename... Args>
-    void solution(fmt::format_string<Args...> fmt, const Args&... args) {
-        addLogline(fmt::fg(fmt::color::lime), fmt, args...);
+    void solution(fmt::format_string<Args...> fmt, Args&&... args) {
+        addLogline(fmt::fg(fmt::color::lime), fmt, std::forward<Args>(args)...);
     }
 };
 
-inline Logger logger;
+extern Logger logger;
 
 template <typename Ratio = std::milli>
 struct StopWatch {
     const std::string sectionName;
-    const std::chrono::steady_clock::time_point start;
+    const uint64_t startTick;
 
-    explicit StopWatch(std::string sectionName)
-        : sectionName{std::move(sectionName)}, start{std::chrono::steady_clock::now()} {}
+    explicit StopWatch(std::string sectionName) : sectionName{std::move(sectionName)}, startTick{TSC::GetTicks()} {}
 
     ~StopWatch() {
-        const auto stop = std::chrono::steady_clock::now();
-        const std::chrono::duration<double, Ratio> duration{stop - start};
+        const auto stopTick = TSC::GetTicks();
+        const auto duration = TSC::TicksTo<std::chrono::duration<double, Ratio>>(stopTick - startTick);
         logger.perf("{} took {}", sectionName, duration);
     }
 
@@ -289,10 +381,22 @@ struct StopWatch {
     }
 };
 
-inline const std::string INPUT_FILE_NAME{"input.txt"s};
+#ifdef NDEBUG
+#define UNREACHABLE() __assume(false)
+#define ASSUME(x) __assume(x)
+#else
+#define UNREACHABLE() assert(false)
+#define ASSUME(x) assert(x)
+#endif
 
-inline auto LoadInput() {
-    return mio::mmap_source{INPUT_FILE_NAME};
+constexpr void Assume(bool x) {
+    if (std::is_constant_evaluated()) {
+        if (!x) {
+            throw std::invalid_argument{"Assumption failed"};
+        }
+    } else {
+        ASSUME(x);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -302,15 +406,3 @@ inline auto LoadInput() {
 #include <Windows.h>
 
 void AocMain(std::string_view input);
-
-int main(const int argc, const char* argv[]) {
-    {
-        StopWatch wholeProgramStopWatch{"Whole Program"};
-        SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
-        SetConsoleCP(CP_UTF8);
-        SetConsoleOutputCP(CP_UTF8);
-        const auto input = StopWatch<std::micro>::Run("LoadInput", LoadInput);
-        StopWatch<std::milli>::Run("AocMain", AocMain, std::string_view{input});
-    }
-    logger.flush();
-}

@@ -17,19 +17,18 @@ struct Hand {
     std::array<u8, SIZE> cards{};
     Strength strength{};
 
-    friend std::strong_ordering operator<=>(const Hand lhs, const Hand rhs) {
+    [[gnu::always_inline]] friend std::strong_ordering operator<=>(const Hand lhs, const Hand rhs) {
         static_assert(std::endian::native == std::endian::little);
         return std::bit_cast<u64>(lhs) <=> std::bit_cast<u64>(rhs);
     }
 
-    template <bool PART2>
-    static u8 CardToNumber(char card) {
+    static u8 CardToNumber(char card, bool jokers) {
         if (IsDigit(card)) {
             return card - '0';
         } else {
             switch (card) {
                 case 'T': return 10;
-                case 'J': return PART2 ? 1 : 11;
+                case 'J': return jokers ? 1 : 11;
                 case 'Q': return 12;
                 case 'K': return 13;
                 case 'A': return 14;
@@ -38,66 +37,52 @@ struct Hand {
         }
     }
 
-    template <bool PART2>
-    static std::array<u8, SIZE> CardsToNumbers(std::string_view cards) {
+    static std::array<u8, SIZE> CardsToNumbers(std::string_view cards, bool jokers) {
         std::array<u8, SIZE> numbers{}; // Reverse to form single little endian number
-        ranges::transform(cards | views::take(SIZE), numbers.rbegin(), CardToNumber<PART2>);
+        ranges::transform(cards | views::take(SIZE), numbers.rbegin(),
+                          [jokers](char card) { return CardToNumber(card, jokers); });
         return numbers;
     }
 
-    template <bool PART2>
-    static Strength CalculateHandStrength(std::span<const u8, SIZE> cards) {
+    static Strength CalculateHandStrength(std::span<const u8, SIZE> cards, bool jokers) {
         std::array<u8, 15> cardCounts{};
         for (const u8 card : cards)
             ++cardCounts[card];
+
+        if (jokers) {
+            const auto max = ranges::max_element(cardCounts | views::drop(2));
+            *max += cardCounts[1];
+        }
 
         std::array<u8, SIZE + 1> ofAKindCounts{};
         for (const u8 kind : cardCounts | views::drop(2))
             ++ofAKindCounts[kind];
 
-        if constexpr (!PART2) {
-            if (ofAKindCounts[5] >= 1) return FIVE_OF_A_KIND;
-            if (ofAKindCounts[4] >= 1) return FOUR_OF_A_KIND;
-            if (ofAKindCounts[3] >= 1 && ofAKindCounts[2] >= 1) return FULL_HOUSE;
-            if (ofAKindCounts[3] >= 1) return THREE_OF_A_KIND;
-            if (ofAKindCounts[2] >= 2) return TWO_PAIR;
-            if (ofAKindCounts[2] >= 1) return ONE_PAIR;
-        } else {
-            const int jokerCount     = cardCounts[1];
-            const auto CanBeXOfAKind = [&](int x) {
-                int requiredJokers = 0;
-                while (x >= 0 && requiredJokers <= jokerCount) {
-                    if (ofAKindCounts[x] >= 1) return true;
-                    --x;
-                    ++requiredJokers;
-                }
-                return false;
-            };
-
-            if (CanBeXOfAKind(5)) return FIVE_OF_A_KIND;
-            if (CanBeXOfAKind(4)) return FOUR_OF_A_KIND;
-            if ((ofAKindCounts[3] >= 1 && ofAKindCounts[2] >= 1) || (ofAKindCounts[2] >= 2 && jokerCount > 0))
-                return FULL_HOUSE;
-            if (CanBeXOfAKind(3)) return THREE_OF_A_KIND;
-            if (ofAKindCounts[2] >= 2) return TWO_PAIR;
-            if (CanBeXOfAKind(2)) return ONE_PAIR;
-        }
+        if (ofAKindCounts[5] >= 1) return FIVE_OF_A_KIND;
+        if (ofAKindCounts[4] >= 1) return FOUR_OF_A_KIND;
+        if (ofAKindCounts[3] >= 1 && ofAKindCounts[2] >= 1) return FULL_HOUSE;
+        if (ofAKindCounts[3] >= 1) return THREE_OF_A_KIND;
+        if (ofAKindCounts[2] >= 2) return TWO_PAIR;
+        if (ofAKindCounts[2] >= 1) return ONE_PAIR;
         return HIGH_CARD;
     }
 
-    template <bool PART2>
-    static Hand Parse(std::string_view handStr) {
-        auto split       = handStr.find(' ');
-        const auto cards = CardsToNumbers<PART2>(handStr.substr(0, split));
-        return {.bid      = ParseNumber<s16>(handStr.substr(split + 1)),
-                .cards    = cards,
-                .strength = CalculateHandStrength<PART2>(cards)};
+    static std::tuple<Hand, Hand> Parse(std::string_view handStr) {
+        const auto split       = handStr.find(' ');
+        const auto hand        = handStr.substr(0, split);
+        const auto bid         = ParseNumber<s16>(handStr.substr(split + 1));
+        const auto cards       = CardsToNumbers(hand, false);
+        const auto cardsWJoker = CardsToNumbers(hand, true);
+        return {
+            {.bid = bid, .cards = cards, .strength = CalculateHandStrength(cards, false)},
+            {.bid = bid, .cards = cardsWJoker, .strength = CalculateHandStrength(cardsWJoker, false)},
+        };
     }
 };
 
-template <bool PART2>
-std::vector<Hand> Parse(std::string_view input) {
-    return input | Split('\n') | views::transform(Hand::Parse<PART2>) | ranges::to<std::vector>;
+std::tuple<std::vector<Hand>, std::vector<Hand>> Parse(std::string_view input) {
+    return input | Split('\n') | views::transform(Hand::Parse) |
+           ranges::to<std::vector>;
 }
 
 s64 Solve(std::span<Hand> hands) {
@@ -105,6 +90,8 @@ s64 Solve(std::span<Hand> hands) {
     s64 rank  = 1;
     s64 score = 0;
     for (const Hand hand : hands) {
+        std::string str{"test string"};
+        logger.info("{} {} {} {}", hand.cards, hand.bid, str, str.c_str());
         score += hand.bid * rank;
         ++rank;
     }
@@ -121,8 +108,8 @@ KTJJT 220
 QQQJA 483
 )"sv;
     for (std::string_view in : {test, input}) {
-        auto hands1 = StopWatch<std::micro>::Run("Parse1", Parse<false>, in);
-        auto hands2 = StopWatch<std::micro>::Run("Parse2", Parse<true>, in);
+        auto hands1 = StopWatch<std::micro>::Run("Parse1", Parse, in, false);
+        auto hands2 = StopWatch<std::micro>::Run("Parse2", Parse, in, true);
         logger.solution("Part 1: {}", StopWatch<std::micro>::Run("Part1", Solve, hands1));
         logger.solution("Part 2: {}", StopWatch<std::micro>::Run("Part2", Solve, hands2));
     }

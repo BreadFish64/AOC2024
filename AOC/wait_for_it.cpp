@@ -5,7 +5,7 @@ struct Race {
 };
 
 s64 CountWinCondition(const Race& race) {
-    const auto [lower, upper] = SolveQuadratic(-1.0, race.time, -race.distance);
+    const auto [lower, upper] = SolveQuadratic<double>(-1.0, race.time, -race.distance);
     // Refine the limits with a loop because
     // I don't feel like figuring out a mathematical way to get this right
     s64 iupper = static_cast<s64>(upper) + 1;

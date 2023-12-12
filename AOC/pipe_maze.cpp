@@ -29,23 +29,33 @@ const std::array<Coord, 4> DIRECTION_OFFSETS{{
     Coord{0, -1},
     Coord{-1, 0},
 }};
+const std::array<Coord, 128> DIRECTION_OFFSETS2 = [] {
+    std::array<Coord, 128> tmp{};
+    tmp[RIGHT] = DIRECTION_OFFSETS[0];
+    tmp[DOWN]  = DIRECTION_OFFSETS[1];
+    tmp[LEFT]  = DIRECTION_OFFSETS[2];
+    tmp[UP]    = DIRECTION_OFFSETS[3];
+    return tmp;
+}();
 Coord DirectionOffset(u8 direction) {
     AssertIsDirection(direction);
-    return DIRECTION_OFFSETS[std::countr_zero(direction) >> 1];
+    return DIRECTION_OFFSETS2[direction];
 }
 
 s64 Flood(const PipeMap pipeMap, const Coord position, const u8 entryDirection) {
-    if (position[0] >= pipeMap.extent(0) || position[1] >= pipeMap.extent(1)) return 0;
+    if (position[0] >= pipeMap.extent(0) || position[1] >= pipeMap.extent(1)) [[unlikely]] return 0;
     {
         u8& cellRef = pipeMap[ToSpan(position)];
         u8 cell     = cellRef;
-        if (cell & CHECKED_MASK) return 0;
+        if (cell & CHECKED_MASK) [[likely]] return 0;
         cellRef = cell | IS_FLOODED;
     }
-    return ranges::accumulate(DIRECTIONS, s64{1}, std::plus{}, [&](const u8 exitDirection) -> s64 {
-        if (exitDirection == entryDirection) return 0;
-        return Flood(pipeMap, position + DirectionOffset(exitDirection), Opposite(exitDirection));
-    });
+    s64 floodedCount{1};
+    for (unsigned exitDirection = RIGHT; exitDirection <= UP; exitDirection <<= 2) {
+        if (exitDirection == entryDirection) continue;
+        floodedCount += Flood(pipeMap, position + DirectionOffset(exitDirection), Opposite(exitDirection));
+    }
+    return floodedCount;
 }
 
 void TraversePipe(const PipeMap pipeMap, const Coord startPos,
@@ -63,7 +73,7 @@ void TraversePipe(const PipeMap pipeMap, const Coord startPos,
     } while (!ranges::equal(startPos, position));
 }
 
-void Solve(const PipeMap pipeMap, const Coord startPos) {
+[[msvc::noinline, gnu::noinline]] void Solve(const PipeMap pipeMap, const Coord startPos) {
     s64 pipeCount{};
     {
         StopWatch<std::micro> part1Watch{"Marking Pipes"};

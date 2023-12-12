@@ -11,7 +11,7 @@ add_library(common_pch
     pch.cpp
 )
 target_link_libraries(common_pch PUBLIC fmt::fmt range-v3 Boost::boost std::mdspan Eigen3::Eigen Microsoft.GSL::GSL mio::mio lodepng)
-target_compile_options(common_pch PUBLIC /utf-8 /W4)
+target_compile_options(common_pch PUBLIC /utf-8 /W4 /FA)
 target_compile_definitions(common_pch PUBLIC MDSPAN_USE_BRACKET_OPERATOR=0 _MDSPAN_USE_ATTRIBUTE_NO_UNIQUE_ADDRESS=0)
 target_precompile_headers(common_pch PUBLIC pch.hpp)
 
@@ -49,3 +49,4 @@ Problem(camel_cards)
 Problem(haunted_wasteland)
 Problem(mirage_maintenance)
 Problem(pipe_maze)
+Problem(cosmic_expansion)

@@ -247,32 +247,32 @@ inline T ParseNumber(std::string_view str) {
 #pragma region tuple_like_Eigen_Array
 
 template <typename T, int N>
-struct std::tuple_size<Eigen::Array<T, N, 1>> : public integral_constant<std::size_t, N> {};
+struct std::tuple_size<Eigen::Array<T, N, 1, 0, N, 1>> : public integral_constant<std::size_t, N> {};
 
 template <std::size_t I, typename T, int N>
-struct std::tuple_element<I, Eigen::Array<T, N, 1>> {
+struct std::tuple_element<I, Eigen::Array<T, N, 1, 0, N, 1>> {
     using type = T;
 };
 
 template <std::size_t I, typename T, int N>
     requires(I < N)
-inline const T& get(const Eigen::Array<T, N, 1>& arr) {
+inline const T& get(const Eigen::Array<T, N, 1, 0, N, 1>& arr) {
     return arr[I];
 };
 
 template <std::size_t I, typename T, int N>
     requires(I < N)
-inline T& get(Eigen::Array<T, N, 1>& arr) {
+inline T& get(Eigen::Array<T, N, 1, 0, N, 1>& arr) {
     return arr[I];
 };
 
 template <typename T, int N>
-inline std::span<const T, N> ToSpan(const Eigen::Array<T, N, 1>& arr) {
+inline std::span<const T, N> ToSpan(const Eigen::Array<T, N, 1, 0, N, 1>& arr) {
     return std::span<const T, N>{arr.data(), static_cast<size_t>(arr.size())};
 }
 
 template <typename T, int N>
-inline std::span<T, N> ToSpan(Eigen::Array<T, N, 1>& arr) {
+inline std::span<T, N> ToSpan(Eigen::Array<T, N, 1, 0, N, 1>& arr) {
     return std::span<T, N>{arr.data(), static_cast<size_t>(arr.size())};
 }
 

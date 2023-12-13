@@ -21,7 +21,7 @@ add_executable(${problem_name}
     ${problem_name}.cpp
 )
 
-target_compile_options(${problem_name} PRIVATE /utf-8 /W4)
+target_compile_options(${problem_name} PRIVATE /utf-8 /W4 /FA)
 target_link_libraries(${problem_name} PRIVATE common_pch)
 target_precompile_headers(${problem_name} REUSE_FROM common_pch)
 
@@ -52,3 +52,4 @@ Problem(pipe_maze)
 Problem(cosmic_expansion)
 Problem(hot_springs)
 target_compile_options(hot_springs PRIVATE /F268435456)
+Problem(point_of_incidence)

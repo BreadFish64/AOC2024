@@ -180,6 +180,15 @@ inline std::bitset<64> rotl(std::bitset<64> x, int s) {
     return std::rotl(static_cast<u64>(x.to_ullong()), s);
 }
 
+template<std::unsigned_integral U>
+constexpr U bitreverse(U x) noexcept {
+    x = std::byteswap(x);
+    x = ((x & static_cast<U>(0x0F0F0F0F0F0F0F0FULL)) << 4) | ((x & static_cast<U>(0xF0F0F0F0F0F0F0F0ULL)) >> 4);
+    x = ((x & static_cast<U>(0x3333333333333333ULL)) << 2) | ((x & static_cast<U>(0xCCCCCCCCCCCCCCCCULL)) >> 2);
+    x = ((x & static_cast<U>(0x5555555555555555ULL)) << 1) | ((x & static_cast<U>(0xAAAAAAAAAAAAAAAAULL)) >> 1);
+    return x;
+}
+
 [[gnu::always_inline]] inline u32 popcount(u128 i) {
     return std::popcount(static_cast<u64>(i & 0xFFFFFFFFFFFFFFFFULL)) + std::popcount(static_cast<u64>(i >> 64));
 }

@@ -55,17 +55,25 @@
 using namespace std::literals;
 namespace views = ranges::views;
 
-using u8   = std::uint8_t;
-using u16  = std::uint16_t;
-using u32  = std::uint32_t;
-using u64  = std::uint64_t;
+using u8  = std::uint8_t;
+using u16 = std::uint16_t;
+using u32 = std::uint32_t;
+using u64 = std::uint64_t;
+#if defined(__GNUC__) || defined(__clang__)
+using u128 = unsigned __int128;
+#else
 using u128 = boost::multiprecision::uint128_t;
+#endif
 
-using s8   = std::int8_t;
-using s16  = std::int16_t;
-using s32  = std::int32_t;
-using s64  = std::int64_t;
+using s8  = std::int8_t;
+using s16 = std::int16_t;
+using s32 = std::int32_t;
+using s64 = std::int64_t;
+#ifdef __GNUC__ || defined(__clang__)
+using s128 = signed __int128;
+#else
 using s128 = boost::multiprecision::int128_t;
+#endif
 
 using f32 = float;
 using f64 = double;
@@ -171,6 +179,106 @@ inline std::bitset<64> rotr(std::bitset<64> x, int s) {
 inline std::bitset<64> rotl(std::bitset<64> x, int s) {
     return std::rotl(static_cast<u64>(x.to_ullong()), s);
 }
+
+[[gnu::always_inline]] inline u32 popcount(u128 i) {
+    return std::popcount(static_cast<u64>(i & 0xFFFFFFFFFFFFFFFFULL)) + std::popcount(static_cast<u64>(i >> 64));
+}
+[[gnu::always_inline]] inline u32 countr_zero(u128 i) {
+    const auto lo = static_cast<u64>(i & 0xFFFFFFFFFFFFFFFFULL);
+    const auto hi = static_cast<u64>(i >> 64);
+    return (lo == 0) ? std::countr_zero(hi) + 64 : std::countr_zero(lo);
+}
+[[gnu::always_inline]] inline u32 countr_one(u128 i) {
+    const auto lo = static_cast<u64>(i & 0xFFFFFFFFFFFFFFFFULL);
+    const auto hi = static_cast<u64>(i >> 64);
+    return (~lo == 0) ? std::countr_one(hi) + 64 : std::countr_one(lo);
+}
+[[gnu::always_inline]] inline u32 countl_zero(u128 i) {
+    const auto lo = static_cast<u64>(i & 0xFFFFFFFFFFFFFFFFULL);
+    const auto hi = static_cast<u64>(i >> 64);
+    return (hi == 0) ? std::countl_zero(lo) + 64 : std::countl_zero(hi);
+}
+
+[[gnu::always_inline]] inline u128 pdep(u128 src, u128 mask) {
+    u64 low  = _pdep_u64(static_cast<u64>(src), static_cast<u64>(mask & 0xFFFFFFFFFFFFFFFFULL));
+    u64 high = _pdep_u64(static_cast<u64>(src >> std::popcount(static_cast<u64>(mask & 0xFFFFFFFFFFFFFFFFULL))),
+                         static_cast<u64>(mask >> 64));
+    return u128{high} << 64 | low;
+}
+
+// https://stackoverflow.com/a/8281965
+template <typename I>
+[[gnu::always_inline]] inline I bit_twiddle_permute(I v) {
+    I t = v | (v - 1); // t gets v's least significant 0 bits set to 1
+    // Next set to 1 the most significant bit to change,
+    // set to 0 the least significant ones, and add the necessary 1 bits.
+    I w = (t + 1) | (((~t & -~t) - 1) >> (countr_zero(v) + 1));
+    return w;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// https://github.com/yuzu-emu/yuzu/blob/master/src/common/container_hash.h
+template <std::unsigned_integral T>
+constexpr std::size_t HashValue(T val) {
+    const unsigned int size_t_bits = std::numeric_limits<std::size_t>::digits;
+    const unsigned int length      = (std::numeric_limits<T>::digits - 1) / static_cast<unsigned int>(size_t_bits);
+
+    std::size_t seed = 0;
+
+    for (unsigned int i = length * size_t_bits; i > 0; i -= size_t_bits) {
+        seed ^= static_cast<size_t>(val >> i) + (seed << 6) + (seed >> 2);
+    }
+
+    seed ^= static_cast<size_t>(val) + (seed << 6) + (seed >> 2);
+
+    return seed;
+}
+
+constexpr std::size_t HashValue(const u128& val);
+
+template <size_t Bits>
+struct HashCombineImpl {
+    template <typename T>
+    static constexpr T fn(T seed, T value) {
+        seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        return seed;
+    }
+};
+
+template <>
+struct HashCombineImpl<64> {
+    static constexpr std::uint64_t fn(std::uint64_t h, std::uint64_t k) {
+        const std::uint64_t m = (std::uint64_t(0xc6a4a793) << 32) + 0x5bd1e995;
+        const int r           = 47;
+
+        k *= m;
+        k ^= k >> r;
+        k *= m;
+
+        h ^= k;
+        h *= m;
+
+        // Completely arbitrary number, to prevent 0's
+        // from hashing to 0.
+        h += 0xe6546b64;
+
+        return h;
+    }
+};
+
+template <typename T>
+constexpr void HashCombine(std::size_t& seed, const T& v) {
+    seed = HashCombineImpl<sizeof(std::size_t) * CHAR_BIT>::fn(seed, HashValue(v));
+}
+
+constexpr std::size_t HashValue(const u128& val) {
+    size_t seed = 0;
+    HashCombine(seed, HashValue(static_cast<u64>(val)));
+    HashCombine(seed, HashValue(static_cast<u64>(val >> 64)));
+    return seed;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 constexpr bool IsGraph(char c) {
     return c >= 33 && c <= 126;

@@ -1,60 +1,92 @@
-#define ICL_USE_AOC_IMPLEMENTATION
-namespace AocIcl {
-template <typename Key, typename Compare, typename Allocator>
-using set = boost::container::flat_set<Key, Compare, Allocator>;
-template <typename Key, typename T, typename Compare, typename Allocator>
-using map = boost::container::flat_map<Key, T, Compare, Allocator>;
-} // namespace AocIcl
-
-#include <boost/icl/interval_set.hpp>
-
 namespace {
-using CoordinateInterval = boost::icl::open_interval<s64>;
-using OccupiedSet        = boost::icl::interval_set<s64, std::less, CoordinateInterval>;
 
-s64 Distance(const OccupiedSet& occupied, s64 lower, s64 upper, s64 expansion) {
-    if (upper == lower) return 0;
-    if (upper < lower) std::swap(lower, upper);
-    CoordinateInterval distanceInterval{lower, upper};
-    auto [occupiedBegin, occupiedEnd] = occupied.equal_range(distanceInterval);
-    // Faster than using length(occupied & distanceInterval) which allocates a new set
-    const s64 occupiedCount = ranges::accumulate(occupiedBegin, occupiedEnd, s64{}, std::plus{},
-                                                 [distanceInterval](const CoordinateInterval& occupiedInterval) {
-                                                     return boost::icl::length(distanceInterval & occupiedInterval);
-                                                 });
-    return expansion * (boost::icl::length(distanceInterval) - occupiedCount) + occupiedCount + 1;
+void CompactGalaxies(boost::container::static_vector<u32, 192>& compacted,
+                     boost::container::static_vector<u32, 192>& counts, const std::span<const u32> galaxies) {
+    compacted.emplace_back(galaxies.front());
+    counts.emplace_back(1);
+    for (const u32 galaxy : galaxies.subspan<1>()) {
+        if (galaxy == compacted.back()) {
+            ++counts.back();
+        } else {
+            compacted.emplace_back(galaxy);
+            counts.emplace_back(1);
+        }
+    }
+    counts.resize(counts.size() + 8);
+}
+
+u64 SolveDimension(boost::container::static_vector<u32, 192> galaxies, const std::span<const u32> counts,
+                   const u32 expansion) {
+    {
+        u32 lastGalaxyOld{galaxies.front()};
+        u32 lastGalaxyExpanded{galaxies.front()};
+        for (u32& __restrict g : std::span{galaxies}.subspan<1>()) {
+            lastGalaxyExpanded += expansion * ((g - std::exchange(lastGalaxyOld, g)) - 1) + 1;
+            g = lastGalaxyExpanded;
+        }
+    }
+    const size_t galaxyCount{galaxies.size()};
+    galaxies.resize(galaxies.size() + 8); // Add padding to avoid masking
+    u64 sum{0};
+    __m256i vSumLo = _mm256_setzero_si256();
+    __m256i vSumHi = _mm256_setzero_si256();
+    for (size_t lower = 0; lower < galaxyCount - 1; ++lower) {
+        __m256i vLowerCount  = _mm256_set1_epi32(counts[lower]);
+        __m256i vLowerGalaxy = _mm256_set1_epi32(galaxies[lower]);
+        for (size_t upper = lower + 1; upper < galaxyCount; upper += 8) {
+            __m256i vUpperCounts   = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(counts.data() + upper));
+            __m256i vUpperGalaxies = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(galaxies.data() + upper));
+            __m256i vCombinations  = _mm256_mullo_epi32(vUpperCounts, vLowerCount);
+            __m256i vDistances     = _mm256_sub_epi32(vUpperGalaxies, vLowerGalaxy);
+            if constexpr (true) {
+                vSumLo = _mm256_add_epi64(vSumLo, _mm256_mul_epu32(vCombinations, vDistances));
+                vSumHi = _mm256_add_epi64(
+                    vSumHi, _mm256_mul_epu32(_mm256_srli_epi64(vCombinations, 32), _mm256_srli_epi64(vDistances, 32)));
+            } else {
+                __m256i tmp32 = _mm256_mullo_epi32(vCombinations, vDistances);
+                vSumLo        = _mm256_add_epi64(vSumLo, _mm256_cvtepu32_epi64(_mm256_castsi256_si128(tmp32)));
+                vSumHi        = _mm256_add_epi64(vSumHi, _mm256_cvtepu32_epi64(_mm256_extracti128_si256(tmp32, 1)));
+            }
+        }
+    }
+    vSumLo = _mm256_add_epi64(vSumLo, vSumHi);
+    sum += _mm256_extract_epi64(vSumLo, 0);
+    sum += _mm256_extract_epi64(vSumLo, 1);
+    sum += _mm256_extract_epi64(vSumLo, 2);
+    sum += _mm256_extract_epi64(vSumLo, 3);
+    return sum;
 }
 } // namespace
 
 void AocMain(std::string_view input) {
-    std::vector<std::pair<s64, s64>> galaxies;
-    OccupiedSet occupiedRows;
-    OccupiedSet occupiedColumns;
+    boost::container::static_vector<u32, 512> galaxiesY;
+    boost::container::static_vector<u32, 512> galaxiesX;
+    boost::container::static_vector<u32, 192> compactedGalaxiesY;
+    boost::container::static_vector<u32, 192> countsY;
+    boost::container::static_vector<u32, 192> compactedGalaxiesX;
+    boost::container::static_vector<u32, 192> countsX;
     {
         StopWatch<std::micro> parseWatch{"Parse"};
-        s64 stride = input.find('\n') + 1;
-        for (s64 i = 0; i < std::ssize(input); ++i) {
+        u32 stride = input.find('\n') + 1;
+        for (u32 i = 0; i < input.size(); ++i) {
             if ('#' == input[i]) {
-                const auto [y, x] = std::div(i, stride);
-                galaxies.emplace_back(y, x);
-                occupiedRows.insert(y);
-                occupiedColumns.insert(x);
+                galaxiesY.emplace_back(i / stride);
+                galaxiesX.emplace_back(i % stride);
             }
         }
+        std::ranges::sort(galaxiesX);
+        CompactGalaxies(compactedGalaxiesX, countsX, galaxiesX);
+        CompactGalaxies(compactedGalaxiesY, countsY, galaxiesY);
     }
-    for (s64 expansion : {2, 10, 100, 1'000'000}) {
-        s64 sum{};
-        {
-            StopWatch<std::micro> solveWatch{fmt::format("Solve for expansion = {}", expansion)};
-            for (auto lhs = galaxies.begin(); lhs != galaxies.end(); ++lhs) {
-                for (auto rhs = lhs + 1; rhs != galaxies.end(); ++rhs) {
-                    auto [ly, lx] = *lhs;
-                    auto [ry, rx] = *rhs;
-                    sum += Distance(occupiedRows, ry, ly, expansion);
-                    sum += Distance(occupiedColumns, rx, lx, expansion);
-                }
+    for (int round = 0; round < 50; ++round) {
+        for (u32 expansion : {2, 10, 100, 1'000'000}) {
+            u64 sum{};
+            {
+                StopWatch<std::micro> solveWatch{fmt::format("Solve for expansion = {}", expansion)};
+                sum = SolveDimension(compactedGalaxiesY, countsY, expansion) +
+                      SolveDimension(compactedGalaxiesX, countsX, expansion);
             }
+            logger.solution("{}: {}", expansion, sum);
         }
-        logger.solution("{}: {}", expansion, sum);
     }
 }

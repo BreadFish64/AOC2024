@@ -180,13 +180,82 @@ inline std::bitset<64> rotl(std::bitset<64> x, int s) {
     return std::rotl(static_cast<u64>(x.to_ullong()), s);
 }
 
-template<std::unsigned_integral U>
-constexpr U bitreverse(U x) noexcept {
+template <std::unsigned_integral U>
+constexpr U bitreverse_portable(U x) noexcept {
     x = std::byteswap(x);
-    x = ((x & static_cast<U>(0x0F0F0F0F0F0F0F0FULL)) << 4) | ((x & static_cast<U>(0xF0F0F0F0F0F0F0F0ULL)) >> 4);
-    x = ((x & static_cast<U>(0x3333333333333333ULL)) << 2) | ((x & static_cast<U>(0xCCCCCCCCCCCCCCCCULL)) >> 2);
-    x = ((x & static_cast<U>(0x5555555555555555ULL)) << 1) | ((x & static_cast<U>(0xAAAAAAAAAAAAAAAAULL)) >> 1);
+
+    const auto Extract = [x](int i) -> U {
+        const U mask{static_cast<U>(0x0101010101010101ULL) << i};
+        return x & mask;
+    };
+
+    // Eliminating dependencies allows clang to vectorize this for u32 and u16
+    U x0{Extract(0) << 7};
+    U x1{Extract(1) << 5};
+    U x2{Extract(2) << 3};
+    U x3{Extract(3) << 1};
+
+    U x4{Extract(4) >> 1};
+    U x5{Extract(5) >> 3};
+    U x6{Extract(6) >> 5};
+    U x7{Extract(7) >> 7};
+
+    x0 |= x4;
+    x1 |= x5;
+    x2 |= x6;
+    x3 |= x7;
+
+    x0 |= x2;
+    x1 |= x3;
+
+    x = x0 | x1;
+
     return x;
+}
+
+template <std::unsigned_integral U>
+[[gnu::flatten]] constexpr U bitreverse(U x) noexcept {
+    return bitreverse_portable<U>(x);
+}
+
+template <>
+[[gnu::flatten]] constexpr u32 bitreverse<u32>(u32 x) noexcept {
+    if (std::is_constant_evaluated()) {
+        return bitreverse_portable<u32>(x);
+    } else {
+        x              = std::byteswap(x);
+        __m128i x_32x4 = _mm_set1_epi32(x);
+        const __m128i slMask_32x4 =
+            _mm_set_epi32(0x01010101ULL << 0, 0x01010101ULL << 1, 0x01010101ULL << 2, 0x01010101ULL << 3);
+        const __m128i srMask_32x4 =
+            _mm_set_epi32(0x01010101ULL << 7, 0x01010101ULL << 6, 0x01010101ULL << 4, 0x01010101ULL << 4);
+        const __m128i shift_32x4 = _mm_set_epi32(7, 5, 3, 1);
+        const __m128i xl_32x4    = _mm_sllv_epi32(_mm_and_si128(x_32x4, slMask_32x4), shift_32x4);
+        const __m128i xr_32x4    = _mm_srlv_epi32(_mm_and_si128(x_32x4, srMask_32x4), shift_32x4);
+        x_32x4                   = _mm_or_si128(xl_32x4, xr_32x4);
+        const u64 x_32x2         = _mm_extract_epi64(x_32x4, 0) | _mm_extract_epi64(x_32x4, 0);
+        return static_cast<u32>(x_32x2) | static_cast<u32>(x_32x2 >> 32);
+    }
+}
+
+template <>
+[[gnu::flatten]] constexpr u64 bitreverse<u64>(u64 x) noexcept {
+    if (std::is_constant_evaluated()) {
+        return bitreverse_portable<u64>(x);
+    } else {
+        x                         = std::byteswap(x);
+        __m256i x_64x4            = _mm256_set1_epi64x(x);
+        const __m256i slMask_64x4 = _mm256_set_epi64x(0x0101010101010101ULL << 0, 0x0101010101010101ULL << 1,
+                                                      0x0101010101010101ULL << 2, 0x0101010101010101ULL << 3);
+        const __m256i srMask_64x4 = _mm256_set_epi64x(0x0101010101010101ULL << 7, 0x0101010101010101ULL << 6,
+                                                      0x0101010101010101ULL << 4, 0x0101010101010101ULL << 4);
+        const __m256i shift_64x4  = _mm256_set_epi64x(7, 5, 3, 1);
+        const __m256i xl_64x4     = _mm256_sllv_epi64(_mm256_and_si256(x_64x4, slMask_64x4), shift_64x4);
+        const __m256i xr_64x4     = _mm256_srlv_epi64(_mm256_and_si256(x_64x4, srMask_64x4), shift_64x4);
+        x_64x4                    = _mm256_or_si256(xl_64x4, xr_64x4);
+        __m128i x_64x2 = _mm_or_si128(_mm256_extracti128_si256(x_64x4, 0), _mm256_extracti128_si256(x_64x4, 1));
+        return _mm_extract_epi64(x_64x2, 0) | _mm_extract_epi64(x_64x2, 1);
+    }
 }
 
 [[gnu::always_inline]] inline u32 popcount(u128 i) {

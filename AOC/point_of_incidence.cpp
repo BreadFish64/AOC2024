@@ -9,16 +9,15 @@ struct Terrain {
     unsigned height{};
     unsigned width{};
 
-    template <bool RIGHT_SIZE>
+    template <bool RIGHT_SIDE>
     static bool HasSmudgeCount(const std::span<const Slice> slices, unsigned width, unsigned smudgeTarget,
                                unsigned mirrorSize) {
         smudgeTarget *= 2; // mirroring and xoring will flip two bits per smudge
-        Slice mask = (Slice{1} << mirrorSize) - 1;
-        mask |= bitreverse(mask);
-        Slice smudges{};
+        const Slice mask{std::rotr((Slice{1} << 2 * mirrorSize) - 1, mirrorSize)};
+        unsigned smudges{};
         for (const Slice slice : slices) {
             const Slice rotated =
-                RIGHT_SIZE ? std::rotl(std::rotr(slice, width), mirrorSize) : std::rotr(slice, mirrorSize);
+                RIGHT_SIDE ? std::rotl(std::rotr(slice, width), mirrorSize) : std::rotr(slice, mirrorSize);
             const Slice masked    = rotated & mask;
             const Slice reflected = bitreverse(masked);
             smudges += std::popcount(masked ^ reflected);
@@ -36,15 +35,14 @@ struct Terrain {
         return std::nullopt;
     }
 
-    template <bool SMUDGES>
-    unsigned findMirror() const {
-        if (auto mirrorPos = FindMirrorOnAxis(std::span{horizontal}.first(height), width, SMUDGES ? 1 : 0)) {
+    unsigned findMirror(unsigned smudgeTarget) const {
+        if (auto mirrorPos = FindMirrorOnAxis(std::span{horizontal}.first(height), width, smudgeTarget)) {
             return *mirrorPos;
         }
-        if (auto mirrorPos = FindMirrorOnAxis(std::span{vertical}.first(width), height, SMUDGES ? 1 : 0)) {
+        if (auto mirrorPos = FindMirrorOnAxis(std::span{vertical}.first(width), height, smudgeTarget)) {
             return *mirrorPos * 100;
         }
-        throw std::logic_error{"no mirror"};
+        return 0;
     }
 
     static Terrain parse(std::string_view expanded) {
@@ -64,9 +62,10 @@ struct Terrain {
     }
 };
 
-template <bool SMUDGES>
+template <unsigned SMUDGE_TARGET>
 u64 Part(const std::span<const Terrain> terrains) {
-    return ranges::accumulate(terrains, u64{}, std::plus{}, &Terrain::findMirror<SMUDGES>);
+    return ranges::accumulate(terrains, u64{}, std::plus{},
+                              [](const Terrain& terrain) { return terrain.findMirror(SMUDGE_TARGET); });
 }
 
 std::vector<Terrain> Parse(std::string_view input) {
@@ -78,9 +77,7 @@ std::vector<Terrain> Parse(std::string_view input) {
 void AocMain(std::string_view input) {
     for (int i = 0; i < 100; ++i) {
         const std::vector<Terrain> terrains = StopWatch<std::micro>::Run("Parse", Parse, input);
-        logger.info("Max height: {}", ranges::max(terrains, std::less{}, &Terrain::height).height);
-        logger.info("Max width: {}", ranges::max(terrains, std::less{}, &Terrain::width).width);
-        logger.solution("Part 1: {}\n", StopWatch<std::micro>::Run("Part 1", Part<false>, std::span{terrains}));
-        logger.solution("Part 2: {}\n", StopWatch<std::micro>::Run("Part 2", Part<true>, std::span{terrains}));
+        logger.solution("Part 1: {}", StopWatch<std::micro>::Run("Part 1", Part<0>, std::span{terrains}));
+        logger.solution("Part 2: {}", StopWatch<std::micro>::Run("Part 2", Part<1>, std::span{terrains}));
     }
 }

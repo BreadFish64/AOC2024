@@ -60,51 +60,35 @@ void TraverseBeam(const MirrorGrid& mirrors, const BeamGrid& beamTiles, Coord co
     if (coord[0] >= beamTiles.extent(0) || coord[1] >= beamTiles.extent(1)) {
         return;
     }
-    const char mirror = mirrors[ToSpan(coord)];
-    auto& beams       = beamTiles[ToSpan(coord)];
-    switch (mirror) {
+    if (TestAndSetBeamDirection(beamTiles[ToSpan(coord)], direction)) return;
+    switch (mirrors[ToSpan(coord)]) {
         case '.': {
-            if (TestAndSetBeamDirection(beams, direction)) return;
             [[clang::musttail]] return TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(direction), direction);
         }
         case '/': {
             const u8 exitDirection = (direction & RIGHT_OR_LEFT) ? Left(direction) : Right(direction);
-            if (TestAndSetBeamDirection(beams, exitDirection)) return;
             [[clang::musttail]] return TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(exitDirection),
                                                     exitDirection);
         }
         case '\\': {
             const u8 exitDirection = (direction & UP_OR_DOWN) ? Left(direction) : Right(direction);
-            if (TestAndSetBeamDirection(beams, exitDirection)) return;
             [[clang::musttail]] return TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(exitDirection),
                                                     exitDirection);
         }
         case '|': {
             if (direction & RIGHT_OR_LEFT) {
-                if (!TestAndSetBeamDirection(beams, DOWN)) {
-                    TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(DOWN), DOWN);
-                }
-                if (!TestAndSetBeamDirection(beams, UP)) {
-                    [[clang::musttail]] return TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(UP), UP);
-                }
-                return;
+                TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(DOWN), DOWN);
+                [[clang::musttail]] return TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(UP), UP);
             } else {
-                if (TestAndSetBeamDirection(beams, direction)) return;
                 [[clang::musttail]] return TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(direction),
                                                         direction);
             }
         }
         case '-': {
             if (direction & UP_OR_DOWN) {
-                if (!TestAndSetBeamDirection(beams, RIGHT)) {
-                    TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(RIGHT), RIGHT);
-                }
-                if (!TestAndSetBeamDirection(beams, LEFT)) {
-                    [[clang::musttail]] return TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(LEFT), LEFT);
-                }
-                return;
+                TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(RIGHT), RIGHT);
+                [[clang::musttail]] return TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(LEFT), LEFT);
             } else {
-                if (TestAndSetBeamDirection(beams, direction)) return;
                 [[clang::musttail]] return TraverseBeam(mirrors, beamTiles, coord + DirectionOffset(direction),
                                                         direction);
             }
@@ -122,24 +106,27 @@ u64 Part1(const MirrorGrid& mirrors, const BeamGrid& beamTiles, const std::span<
 }
 
 u64 Part2(const MirrorGrid& mirrors, const BeamGrid& beamTiles, const std::span<u8> beamTiles1d) {
-    u64 maxTiles{};
+    const auto Task = [&mirrors](Coord startingCoord, u8 startingDirection) -> u64 {
+        std::vector<u8> parBeamTiles1d(mirrors.extent(0) * mirrors.extent(1));
+        BeamGrid parBeamTiles{parBeamTiles1d.data(), mirrors.extents()};
+        TraverseBeam(mirrors, parBeamTiles, startingCoord, startingDirection);
+        return CountEnergized(parBeamTiles1d);
+    };
+    std::vector<std::future<u64>> traversalTasks;
+    traversalTasks.reserve(2 * (beamTiles.extent(0) + beamTiles.extent(1)));
     for (usize y : views::iota(0_sz, mirrors.extent(0))) {
-        ranges::fill(beamTiles1d, u8{});
-        TraverseBeam(mirrors, beamTiles, Coord{y, 0}, RIGHT);
-        maxTiles = std::max(maxTiles, CountEnergized(beamTiles1d));
-        ranges::fill(beamTiles1d, u8{});
-        TraverseBeam(mirrors, beamTiles, Coord{y, mirrors.extent(1) - 1}, LEFT);
-        maxTiles = std::max(maxTiles, CountEnergized(beamTiles1d));
+        traversalTasks.emplace_back(std::async(std::launch::async, Task, Coord{y, 0}, RIGHT));
+        traversalTasks.emplace_back(std::async(std::launch::async, Task, Coord{y, mirrors.extent(1) - 1}, LEFT));
     }
     for (usize x : views::iota(0_sz, mirrors.extent(1))) {
-        ranges::fill(beamTiles1d, u8{});
-        TraverseBeam(mirrors, beamTiles, Coord{0, x}, DOWN);
-        maxTiles = std::max(maxTiles, CountEnergized(beamTiles1d));
-        ranges::fill(beamTiles1d, u8{});
-        TraverseBeam(mirrors, beamTiles, Coord{mirrors.extent(0) - 1, x}, UP);
-        maxTiles = std::max(maxTiles, CountEnergized(beamTiles1d));
+        traversalTasks.emplace_back(std::async(std::launch::async, Task, Coord{0, x}, DOWN));
+        traversalTasks.emplace_back(std::async(std::launch::async, Task, Coord{mirrors.extent(0) - 1, x}, UP));
     }
-    return maxTiles;
+    u64 maxEnergized{};
+    for (auto& task : traversalTasks) {
+        maxEnergized = std::max(maxEnergized, task.get());
+    }
+    return maxEnergized;
 }
 
 } // namespace

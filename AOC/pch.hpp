@@ -52,6 +52,8 @@
 
 #include "tsc.hpp"
 
+#undef IN
+
 using namespace std::literals;
 namespace views = ranges::views;
 
@@ -423,10 +425,10 @@ constexpr auto Split(const auto& c) {
 }
 
 template <typename T>
-inline T ParseNumber(std::string_view str) {
+inline T ParseNumber(std::string_view str, int base = 10) {
     T val{};
     if (str.front() == '+') str.remove_prefix(1);
-    ThrowOnError(std::from_chars(str.data(), str.data() + str.size(), val));
+    ThrowOnError(std::from_chars(str.data(), str.data() + str.size(), val, base));
     return val;
 }
 

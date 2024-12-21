@@ -1,16 +1,26 @@
-namespace {
-const std::string INPUT_FILE_NAME{"input.txt"s};
+#include <fstream>
 
-auto LoadInput() {
-    return mio::mmap_source{INPUT_FILE_NAME};
+#ifdef WIN32
+#include <Windows.h>
+#endif
+
+Logger logger;
+
+namespace {
+
+std::string LoadInput() {
+    std::ifstream inputFile{"input.txt", std::ios::binary};
+    return std::string{std::istreambuf_iterator{inputFile}, {}};
 }
 
 inline void AocMainInternal() {
     {
         StopWatch wholeProgramStopWatch{"Whole Program"};
+#ifdef WIN32
         SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
         SetConsoleCP(CP_UTF8);
         SetConsoleOutputCP(CP_UTF8);
+#endif
         const auto input = StopWatch<std::micro>::Run("LoadInput", LoadInput);
         StopWatch<std::milli>::Run("AocMain", AocMain, std::string_view{input});
     }
@@ -32,8 +42,6 @@ void Logger::flush() {
         logLine();
     }
 }
-
-Logger logger;
 
 int main([[maybe_unused]] const int argc, [[maybe_unused]] const char* argv[]) {
     AocMainInternal();

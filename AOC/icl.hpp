@@ -1,3 +1,5 @@
+#pragma once
+
 #define ICL_USE_AOC_IMPLEMENTATION
 namespace AocIcl {
 template <typename Key, typename Compare, typename Allocator>
@@ -6,20 +8,37 @@ template <typename Key, typename T, typename Compare, typename Allocator>
 using map = boost::container::flat_map<Key, T, Compare, Allocator>;
 } // namespace AocIcl
 
+#include <boost/icl/interval.hpp>
 #include <boost/icl/interval_map.hpp>
 
-template <>
-struct fmt::formatter<boost::icl::right_open_interval<s64>> : fmt::formatter<s64> {
+template <class T>
+struct std::formatter<boost::icl::right_open_interval<T>> : std::formatter<T> {
     // parse is inherited from formatter<string_view>.
 
-    auto format(boost::icl::right_open_interval<s64> seedRange, format_context& ctx) const {
+    auto format(boost::icl::right_open_interval<T> interval, format_context& ctx) const {
         auto it = ctx.out();
         *it++   = '[';
-        it      = fmt::formatter<s64>::format(seedRange.lower(), ctx);
+        it      = std::formatter<T>::format(interval.lower(), ctx);
         *it++   = ',';
         *it++   = ' ';
-        it      = fmt::formatter<s64>::format(seedRange.upper(), ctx);
+        it      = std::formatter<T>::format(interval.upper(), ctx);
         *it++   = ')';
+        return it;
+    }
+};
+
+template <class T>
+struct std::formatter<boost::icl::closed_interval<T>> : std::formatter<T> {
+    // parse is inherited from formatter<string_view>.
+
+    auto format(boost::icl::closed_interval<T> interval, format_context& ctx) const {
+        auto it = ctx.out();
+        *it++   = '[';
+        it      = std::formatter<T>::format(interval.lower(), ctx);
+        *it++   = ',';
+        *it++   = ' ';
+        it      = std::formatter<T>::format(interval.upper(), ctx);
+        *it++   = ']';
         return it;
     }
 };

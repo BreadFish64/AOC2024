@@ -6,21 +6,19 @@
 
 #include <cassert>
 #include <chrono>
-#include <stdint.h>
+#include <concepts>
+
+#include <boost/rational.hpp>
 
 #ifdef _MSC_VER
 #include <intrin.h>
+#include <Windows.h>
 #else
 #include <cpuid.h>
 #include <x86intrin.h>
 #endif
 
-#include <boost/multiprecision/cpp_int.hpp>
-
-using DoubleSeconds = std::chrono::duration<double>;
-using DoubleMs      = std::chrono::duration<double, std::milli>;
-
-struct TSC {
+struct TscClock {
     struct TickRate {
         uint32_t crystalFrequency;
         uint32_t tscCrystalRatioNumerator;
@@ -36,24 +34,30 @@ private:
     static TickRate GetTickRateRaw();
 
 public:
+    using rep    = double;
+    using period = std::ratio<1, 1>; // Seconds
+
+    using duration                  = std::chrono::duration<rep, period>;
+    using time_point                = std::chrono::time_point<TscClock>;
+    static constexpr bool is_steady = true;
+
     /// <summary>
     /// Tick rate of the hardware clock
     /// Usually the processor's advertised base clock
     /// </summary>
     static const inline TickRate TICK_RATE = GetTickRateRaw();
 
-    template <typename Duration>
-    static Duration TicksTo(const uint64_t ticks) {
-        const DoubleSeconds seconds{ticks * TICK_RATE.invPerSecond};
-        return std::chrono::duration_cast<Duration>(seconds);
+    static uint64_t rdtsc() noexcept {
+        _mm_lfence();         // ensure instruction ordering
+        auto tsc = __rdtsc(); // read the hardware clock
+        _mm_lfence();         // ensure instruction ordering
+        return tsc;
     }
 
     /// <summary>
     /// Get the current TSC value
     /// </summary>
-    /// <returns></returns>
-    static uint64_t GetTicks() {
-        _mm_mfence();     // ensure instruction ordering
-        return __rdtsc(); // read the hardware clock
+    static time_point now() noexcept {
+        return time_point{duration{rdtsc() * TICK_RATE.invPerSecond}};
     }
 };

@@ -342,3 +342,5 @@ healthchecksdb
 /AOC/input
 /out/build
 /CMakeSettings.json
+
+/out

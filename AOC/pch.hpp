@@ -11,11 +11,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <execution>
-#include <fstream>
+#include <format>
 #include <future>
 #include <iterator>
 #include <map>
 #include <memory>
+#include <memory_resource>
 #include <numeric>
 #include <optional>
 #include <ranges>
@@ -23,18 +24,12 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <unordered_set>
 #include <utility>
 
-#include <experimental/mdspan>
-
 #include <range/v3/all.hpp>
-
-#include <fmt/chrono.h>
-#include <fmt/color.h>
-#include <fmt/core.h>
-#include <fmt/ranges.h>
 
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
@@ -44,55 +39,34 @@
 #include <boost/unordered/unordered_flat_map.hpp>
 #include <boost/unordered/unordered_flat_set.hpp>
 
-#include <Eigen/Dense>
-
-#include <mio/mmap.hpp>
-
-#include <lodepng.h>
-
-#include "tsc.hpp"
+#include "Attr.hpp"
+#include "Fnv.hpp"
+#include "Mdspan.hpp"
+#include "TscClock.hpp"
 
 #undef IN
 
 using namespace std::literals;
 namespace views = ranges::views;
 
-using u8  = std::uint8_t;
-using u16 = std::uint16_t;
-using u32 = std::uint32_t;
-using u64 = std::uint64_t;
 #if defined(__GNUC__) || defined(__clang__)
-using u128 = unsigned __int128;
+using int128_t  = signed __int128;
+using uint128_t = unsigned __int128;
 #else
-using u128 = boost::multiprecision::uint128_t;
+using int128_t  = boost::multiprecision::int128_t;
+using uint128_t = boost::multiprecision::uint128_t;
 #endif
 
-using s8  = std::int8_t;
-using s16 = std::int16_t;
-using s32 = std::int32_t;
-using s64 = std::int64_t;
-#ifdef __GNUC__ || defined(__clang__)
-using s128 = signed __int128;
-#else
-using s128 = boost::multiprecision::int128_t;
-#endif
-
-using f32 = float;
-using f64 = double;
-
-using usize = std::size_t;
-using ssize = std::make_signed_t<usize>;
-
-constexpr s64 operator""_s64(unsigned long long x) {
-    return static_cast<s64>(x);
+constexpr std::int64_t operator""_int64_t(unsigned long long x) {
+    return static_cast<std::int64_t>(x);
 }
 
-constexpr u64 operator""_u64(unsigned long long x) {
-    return static_cast<u64>(x);
+constexpr std::uint64_t operator""_uint64_t(unsigned long long x) {
+    return static_cast<std::uint64_t>(x);
 }
 
-constexpr usize operator""_sz(unsigned long long x) {
-    return static_cast<usize>(x);
+constexpr std::size_t operator""_size_t(unsigned long long x) {
+    return static_cast<std::size_t>(x);
 }
 
 template <typename I>
@@ -107,18 +81,31 @@ constexpr I DivCeil(I x, I y) {
 }
 
 template <typename I, typename P>
-constexpr I Power(I x, P y) {
+constexpr I Power(I base, P exp) {
     I result = 1;
-    while (y != 0) {
-        if (y & 1) result *= x;
-        x *= x;
-        y >>= 1;
+    while (exp != 0) {
+        if (exp & 1) {
+            result *= base;
+        }
+        base *= base;
+        exp >>= 1;
     }
     return result;
 }
 
+template <auto base, class T>
+constexpr unsigned LogPlusOne(T x) {
+    unsigned log{};
+    T power{1};
+    while (power <= x) {
+        ++log;
+        power *= base;
+    }
+    return log;
+}
+
 template <typename T>
-T sign(T val) {
+T Sign(T val) {
     return (T(0) < val) - (val < T(0));
 }
 
@@ -157,33 +144,8 @@ constexpr I ChineseRemainderTheorem(std::span<const I> modulos, std::span<const 
     return result % product;
 }
 
-inline std::bitset<8> rotr(std::bitset<8> x, int s) {
-    return std::rotr(static_cast<u8>(x.to_ulong()), s);
-}
-inline std::bitset<8> rotl(std::bitset<8> x, int s) {
-    return std::rotl(static_cast<u8>(x.to_ulong()), s);
-}
-inline std::bitset<16> rotr(std::bitset<16> x, int s) {
-    return std::rotr(static_cast<u16>(x.to_ulong()), s);
-}
-inline std::bitset<16> rotl(std::bitset<16> x, int s) {
-    return std::rotl(static_cast<u16>(x.to_ulong()), s);
-}
-inline std::bitset<32> rotr(std::bitset<32> x, int s) {
-    return std::rotr(static_cast<u32>(x.to_ulong()), s);
-}
-inline std::bitset<32> rotl(std::bitset<32> x, int s) {
-    return std::rotl(static_cast<u32>(x.to_ulong()), s);
-}
-inline std::bitset<64> rotr(std::bitset<64> x, int s) {
-    return std::rotr(static_cast<u64>(x.to_ullong()), s);
-}
-inline std::bitset<64> rotl(std::bitset<64> x, int s) {
-    return std::rotl(static_cast<u64>(x.to_ullong()), s);
-}
-
 template <std::unsigned_integral U>
-constexpr U bitreverse_portable(U x) noexcept {
+constexpr U BitreversePortable(U x) noexcept {
     x = std::byteswap(x);
 
     const auto Extract = [x](int i) -> U {
@@ -191,7 +153,7 @@ constexpr U bitreverse_portable(U x) noexcept {
         return x & mask;
     };
 
-    // Eliminating dependencies allows clang to vectorize this for u32 and u16
+    // Eliminating dependencies allows clang to vectorize this for std::uint32_t and u16
     U x0{Extract(0) << 7};
     U x1{Extract(1) << 5};
     U x2{Extract(2) << 3};
@@ -216,14 +178,14 @@ constexpr U bitreverse_portable(U x) noexcept {
 }
 
 template <std::unsigned_integral U>
-[[gnu::flatten]] constexpr U bitreverse(U x) noexcept {
-    return bitreverse_portable<U>(x);
+[[attr_flatten]] constexpr U Bitreverse(U x) noexcept {
+    return BitreversePortable<U>(x);
 }
 
 template <>
-[[gnu::flatten]] constexpr u32 bitreverse<u32>(u32 x) noexcept {
+[[attr_flatten]] constexpr std::uint32_t Bitreverse<std::uint32_t>(std::uint32_t x) noexcept {
     if (std::is_constant_evaluated()) {
-        return bitreverse_portable<u32>(x);
+        return BitreversePortable<std::uint32_t>(x);
     } else {
         x              = std::byteswap(x);
         __m128i x_32x4 = _mm_set1_epi32(x);
@@ -231,19 +193,19 @@ template <>
             _mm_set_epi32(0x01010101ULL << 0, 0x01010101ULL << 1, 0x01010101ULL << 2, 0x01010101ULL << 3);
         const __m128i srMask_32x4 =
             _mm_set_epi32(0x01010101ULL << 7, 0x01010101ULL << 6, 0x01010101ULL << 4, 0x01010101ULL << 4);
-        const __m128i shift_32x4 = _mm_set_epi32(7, 5, 3, 1);
-        const __m128i xl_32x4    = _mm_sllv_epi32(_mm_and_si128(x_32x4, slMask_32x4), shift_32x4);
-        const __m128i xr_32x4    = _mm_srlv_epi32(_mm_and_si128(x_32x4, srMask_32x4), shift_32x4);
-        x_32x4                   = _mm_or_si128(xl_32x4, xr_32x4);
-        const u64 x_32x2         = _mm_extract_epi64(x_32x4, 0) | _mm_extract_epi64(x_32x4, 0);
-        return static_cast<u32>(x_32x2) | static_cast<u32>(x_32x2 >> 32);
+        const __m128i shift_32x4   = _mm_set_epi32(7, 5, 3, 1);
+        const __m128i xl_32x4      = _mm_sllv_epi32(_mm_and_si128(x_32x4, slMask_32x4), shift_32x4);
+        const __m128i xr_32x4      = _mm_srlv_epi32(_mm_and_si128(x_32x4, srMask_32x4), shift_32x4);
+        x_32x4                     = _mm_or_si128(xl_32x4, xr_32x4);
+        const std::uint64_t x_32x2 = _mm_extract_epi64(x_32x4, 0) | _mm_extract_epi64(x_32x4, 0);
+        return static_cast<std::uint32_t>(x_32x2) | static_cast<std::uint32_t>(x_32x2 >> 32);
     }
 }
 
 template <>
-[[gnu::flatten]] constexpr u64 bitreverse<u64>(u64 x) noexcept {
+[[attr_flatten]] constexpr std::uint64_t Bitreverse<std::uint64_t>(std::uint64_t x) noexcept {
     if (std::is_constant_evaluated()) {
-        return bitreverse_portable<u64>(x);
+        return BitreversePortable<std::uint64_t>(x);
     } else {
         x                         = std::byteswap(x);
         __m256i x_64x4            = _mm256_set1_epi64x(x);
@@ -260,35 +222,39 @@ template <>
     }
 }
 
-[[gnu::always_inline]] inline u32 popcount(u128 i) {
-    return std::popcount(static_cast<u64>(i & 0xFFFFFFFFFFFFFFFFULL)) + std::popcount(static_cast<u64>(i >> 64));
+[[gnu::always_inline]] inline std::uint32_t popcount(uint128_t i) {
+    return std::popcount(static_cast<std::uint64_t>(i & 0xFFFFFFFFFFFFFFFFULL)) +
+           std::popcount(static_cast<std::uint64_t>(i >> 64));
 }
-[[gnu::always_inline]] inline u32 countr_zero(u128 i) {
-    const auto lo = static_cast<u64>(i & 0xFFFFFFFFFFFFFFFFULL);
-    const auto hi = static_cast<u64>(i >> 64);
+[[gnu::always_inline]] inline std::uint32_t countr_zero(uint128_t i) {
+    const auto lo = static_cast<std::uint64_t>(i & 0xFFFFFFFFFFFFFFFFULL);
+    const auto hi = static_cast<std::uint64_t>(i >> 64);
     return (lo == 0) ? std::countr_zero(hi) + 64 : std::countr_zero(lo);
 }
-[[gnu::always_inline]] inline u32 countr_one(u128 i) {
-    const auto lo = static_cast<u64>(i & 0xFFFFFFFFFFFFFFFFULL);
-    const auto hi = static_cast<u64>(i >> 64);
+[[gnu::always_inline]] inline std::uint32_t countr_one(uint128_t i) {
+    const auto lo = static_cast<std::uint64_t>(i & 0xFFFFFFFFFFFFFFFFULL);
+    const auto hi = static_cast<std::uint64_t>(i >> 64);
     return (~lo == 0) ? std::countr_one(hi) + 64 : std::countr_one(lo);
 }
-[[gnu::always_inline]] inline u32 countl_zero(u128 i) {
-    const auto lo = static_cast<u64>(i & 0xFFFFFFFFFFFFFFFFULL);
-    const auto hi = static_cast<u64>(i >> 64);
+[[gnu::always_inline]] inline std::uint32_t countl_zero(uint128_t i) {
+    const auto lo = static_cast<std::uint64_t>(i & 0xFFFFFFFFFFFFFFFFULL);
+    const auto hi = static_cast<std::uint64_t>(i >> 64);
     return (hi == 0) ? std::countl_zero(lo) + 64 : std::countl_zero(hi);
 }
 
-[[gnu::always_inline]] inline u128 pdep(u128 src, u128 mask) {
-    u64 low  = _pdep_u64(static_cast<u64>(src), static_cast<u64>(mask & 0xFFFFFFFFFFFFFFFFULL));
-    u64 high = _pdep_u64(static_cast<u64>(src >> std::popcount(static_cast<u64>(mask & 0xFFFFFFFFFFFFFFFFULL))),
-                         static_cast<u64>(mask >> 64));
-    return u128{high} << 64 | low;
+[[gnu::always_inline]] inline uint128_t pdep(uint128_t src, uint128_t mask) {
+    std::uint64_t low =
+        _pdep_u64(static_cast<std::uint64_t>(src), static_cast<std::uint64_t>(mask & 0xFFFFFFFFFFFFFFFFULL));
+    std::uint64_t high = _pdep_u64(
+        static_cast<std::uint64_t>(src >> std::popcount(static_cast<std::uint64_t>(mask & 0xFFFFFFFFFFFFFFFFULL))),
+        static_cast<std::uint64_t>(mask >> 64));
+    return uint128_t{high} << 64 | low;
 }
 
 // https://stackoverflow.com/a/8281965
 template <typename I>
-[[gnu::always_inline]] inline I bit_twiddle_permute(I v) {
+[[gnu::always_inline]] inline I BitTwiddlePermute(I v) {
+    using std::countr_zero;
     I t = v | (v - 1); // t gets v's least significant 0 bits set to 1
     // Next set to 1 the most significant bit to change,
     // set to 0 the least significant ones, and add the necessary 1 bits.
@@ -296,8 +262,6 @@ template <typename I>
     return w;
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// https://github.com/yuzu-emu/yuzu/blob/master/src/common/container_hash.h
 template <std::unsigned_integral T>
 constexpr std::size_t HashValue(T val) {
     const unsigned int size_t_bits = std::numeric_limits<std::size_t>::digits;
@@ -314,7 +278,7 @@ constexpr std::size_t HashValue(T val) {
     return seed;
 }
 
-constexpr std::size_t HashValue(const u128& val);
+constexpr std::size_t HashValue(const uint128_t& val);
 
 template <size_t Bits>
 struct HashCombineImpl {
@@ -351,10 +315,10 @@ constexpr void HashCombine(std::size_t& seed, const T& v) {
     seed = HashCombineImpl<sizeof(std::size_t) * CHAR_BIT>::fn(seed, HashValue(v));
 }
 
-constexpr std::size_t HashValue(const u128& val) {
+constexpr std::size_t HashValue(const uint128_t& val) {
     size_t seed = 0;
-    HashCombine(seed, HashValue(static_cast<u64>(val)));
-    HashCombine(seed, HashValue(static_cast<u64>(val >> 64)));
+    HashCombine(seed, HashValue(static_cast<std::uint64_t>(val)));
+    HashCombine(seed, HashValue(static_cast<std::uint64_t>(val >> 64)));
     return seed;
 }
 
@@ -410,61 +374,30 @@ constexpr auto Split(const auto& c) {
 //                             { return std::apply(fun, std::forward<T>(args)); });
 // }
 
-[[msvc::noinline]] inline void ThrowError(const std::errc errc) {
-    throw std::runtime_error{std::make_error_condition(errc).message()};
+constexpr auto AsPointers = std::views::transform([](auto& ref) { return std::addressof(ref); });
+
+[[attr_noinline]]
+inline void ThrowError(const std::errc errc) {
+    throw std::system_error{std::make_error_code(errc)};
 }
 
-[[msvc::forceinline]] inline void ThrowOnError(const std::errc errc) {
+[[attr_forceinline]] inline void ThrowOnError(const std::errc errc) {
     if (errc != std::errc{}) [[unlikely]] {
         ThrowError(errc);
     }
 }
 
-[[msvc::forceinline]] inline void ThrowOnError(const std::from_chars_result& result) {
+[[attr_forceinline]] inline void ThrowOnError(const std::from_chars_result& result) {
     ThrowOnError(result.ec);
 }
 
-template <typename T>
-inline T ParseNumber(std::string_view str, int base = 10) {
+template <typename T, int base = 10>
+inline T ParseNumber(std::string_view str) {
     T val{};
     if (str.front() == '+') str.remove_prefix(1);
     ThrowOnError(std::from_chars(str.data(), str.data() + str.size(), val, base));
     return val;
 }
-
-#pragma region tuple_like_Eigen_Array
-
-template <typename T, int N>
-struct std::tuple_size<Eigen::Array<T, N, 1, 0, N, 1>> : public integral_constant<std::size_t, N> {};
-
-template <std::size_t I, typename T, int N>
-struct std::tuple_element<I, Eigen::Array<T, N, 1, 0, N, 1>> {
-    using type = T;
-};
-
-template <std::size_t I, typename T, int N>
-    requires(I < N)
-inline const T& get(const Eigen::Array<T, N, 1, 0, N, 1>& arr) {
-    return arr[I];
-};
-
-template <std::size_t I, typename T, int N>
-    requires(I < N)
-inline T& get(Eigen::Array<T, N, 1, 0, N, 1>& arr) {
-    return arr[I];
-};
-
-template <typename T, int N>
-inline std::span<const T, N> ToSpan(const Eigen::Array<T, N, 1, 0, N, 1>& arr) {
-    return std::span<const T, N>{arr.data(), static_cast<size_t>(arr.size())};
-}
-
-template <typename T, int N>
-inline std::span<T, N> ToSpan(Eigen::Array<T, N, 1, 0, N, 1>& arr) {
-    return std::span<T, N>{arr.data(), static_cast<size_t>(arr.size())};
-}
-
-#pragma endregion
 
 template <typename T>
 constexpr auto ParseNumbers = SplitWs | views::transform(ParseNumber<T>);
@@ -501,29 +434,31 @@ class Logger {
 
     template <typename... Args>
     struct LogLine {
-        fmt::text_style storedStyle;
-        fmt::string_view storedFmt;
+        std::string storedStyle;
+        std::string_view storedFmt;
         std::tuple<decltype(CopyRange(std::declval<Args>()))...> storedArgs;
 
-        explicit LogLine(const fmt::text_style& style, fmt::format_string<Args...> fmt, Args&&... args)
-            : storedStyle{style}, storedFmt{fmt.get()},
+        explicit LogLine(std::string style, std::format_string<Args...> fmt, Args&&... args)
+            : storedStyle{std::move(style)}, storedFmt{fmt.get()},
               storedArgs{std::make_tuple(CopyRange(std::forward<Args>(args))...)} {}
 
         void operator()() const {
+            std::fwrite(storedStyle.data(), sizeof(char), storedStyle.size(), stdout);
             auto printArgs = [this](const auto&... unpackedArgs) {
-                fmt::vprint(stdout, storedStyle, storedFmt, fmt::make_format_args(unpackedArgs...));
+                std::vformat_to(std::ostreambuf_iterator{std::cout}, storedFmt, std::make_format_args(unpackedArgs...));
             };
             std::apply(printArgs, storedArgs);
-            std::putc('\n', stdout);
+            constexpr std::string_view resetAndNewline{"\x1b[0m\n"};
+            std::fwrite(resetAndNewline.data(), sizeof(char), resetAndNewline.size(), stdout);
         }
     };
     std::mutex logLinesMutex;
     std::vector<TypeErasedLogLine> logLines;
 
     template <typename... Args>
-    void addLogline(const fmt::text_style& style, fmt::format_string<Args...> fmt, Args&&... args) {
+    void addLogline(std::string style, std::format_string<Args...> fmt, Args&&... args) {
         const std::lock_guard logLinesLock{logLinesMutex};
-        logLines.emplace_back(std::in_place_type<LogLine<Args...>>, style, fmt, std::forward<Args>(args)...);
+        logLines.emplace_back(std::in_place_type<LogLine<Args...>>, std::move(style), fmt, std::forward<Args>(args)...);
     }
 
 public:
@@ -532,18 +467,18 @@ public:
     void flush();
 
     template <typename... Args>
-    void info(fmt::format_string<Args...> fmt, Args&&... args) {
-        addLogline({}, fmt, std::forward<Args>(args)...);
+    void info(std::format_string<Args...> fmt, Args&&... args) {
+        addLogline("", fmt, std::forward<Args>(args)...);
     }
 
     template <typename... Args>
-    void perf(fmt::format_string<Args...> fmt, Args&&... args) {
-        addLogline(fmt::fg(fmt::color::cyan), fmt, std::forward<Args>(args)...);
+    void perf(std::format_string<Args...> fmt, Args&&... args) {
+        addLogline("\x1b[36m", fmt, std::forward<Args>(args)...);
     }
 
     template <typename... Args>
-    void solution(fmt::format_string<Args...> fmt, Args&&... args) {
-        addLogline(fmt::fg(fmt::color::lime), fmt, std::forward<Args>(args)...);
+    void solution(std::format_string<Args...> fmt, Args&&... args) {
+        addLogline("\x1b[92m", fmt, std::forward<Args>(args)...);
     }
 };
 
@@ -551,15 +486,19 @@ extern Logger logger;
 
 template <typename Ratio = std::milli>
 struct StopWatch {
+#ifdef WIN32
+    using Clock = TscClock;
+#else
+    using Clock = std::chrono::steady_clock;
+#endif
     const std::string sectionName;
-    const uint64_t startTick;
+    const Clock::time_point start;
 
-    explicit StopWatch(std::string sectionName) : sectionName{std::move(sectionName)}, startTick{TSC::GetTicks()} {}
+    explicit StopWatch(std::string sectionName) : sectionName{std::move(sectionName)}, start{Clock::now()} {}
 
     ~StopWatch() {
-        const auto stopTick = TSC::GetTicks();
-        const auto duration = TSC::TicksTo<std::chrono::duration<double, Ratio>>(stopTick - startTick);
-        logger.perf("{} took {}", sectionName, duration);
+        const Clock::time_point stop = Clock::now();
+        logger.perf("{} took {}", sectionName, std::chrono::duration<double, Ratio>(stop - start));
     }
 
     template <typename... Args, std::invocable<Args...> Function>
@@ -569,28 +508,74 @@ struct StopWatch {
     }
 };
 
-#ifdef NDEBUG
-#define UNREACHABLE() __assume(false)
-#define ASSUME(x) __assume(x)
-#else
-#define UNREACHABLE() assert(false)
-#define ASSUME(x) assert(x)
-#endif
-
-constexpr void Assume(bool x) {
-    if (std::is_constant_evaluated()) {
-        if (!x) {
-            throw std::invalid_argument{"Assumption failed"};
-        }
-    } else {
-        ASSUME(x);
+template <typename T>
+struct Constructor {
+    template <typename... Args>
+    T operator()(Args&&... args) const {
+        return T{std::forward<Args>(args)...};
     }
+};
+
+template <TupleLike T>
+auto ToExtent(const T& tuple) {
+    using Extents = dextents<std::remove_cvref_t<std::tuple_element<0, T>>, std::tuple_size_v<T>>;
+    return std::make_from_tuple<Extents>(tuple);
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
+template <std::weakly_incrementable... I>
+constexpr auto MultiFor(I... ends) {
+    return ranges::views::cartesian_product(ranges::views::iota(I{}, ends)...);
+}
+template <typename R, typename T>
+constexpr auto PointerProject(R T::*member) {
+    return [member](T* p) {
+        return std::invoke(member, *p);
+    };
+}
 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+template <typename R, typename T>
+constexpr auto PointerProject(R (T::*member)()) {
+    return [member](T* p) {
+        return std::invoke(member, *p);
+    };
+}
+
+template <typename R, typename T>
+constexpr auto PointerProject(R (T::*member)() const) {
+    return [member](const T* p) {
+        return std::invoke(member, *p);
+    };
+}
+
+struct bsearch_includes_fn {
+    template <
+        std::input_iterator I1, std::sentinel_for<I1> S1, std::input_iterator I2, std::sentinel_for<I2> S2,
+        class Proj1 = std::identity, class Proj2 = std::identity,
+        std::indirect_strict_weak_order<std::projected<I1, Proj1>, std::projected<I2, Proj2>> Comp = std::ranges::less>
+    constexpr bool operator()(I1 first1, S1 last1, I2 first2, S2 last2, Comp comp = {}, Proj1 proj1 = {},
+                              Proj2 proj2 = {}) const {
+        for (; first2 != last2; ++first2) {
+            first1 =
+                std::ranges::lower_bound(first1, last1, std::invoke(proj2, *first2), std::ref(comp), std::ref(proj1));
+            if (first1 == last1) return false;
+            if (std::invoke(comp, std::invoke(proj2, *first2), std::invoke(proj1, *first1))) return false;
+        }
+        return true;
+    }
+
+    template <std::ranges::input_range R1, std::ranges::input_range R2, class Proj1 = std::identity,
+              class Proj2 = std::identity,
+              std::indirect_strict_weak_order<std::projected<std::ranges::iterator_t<R1>, Proj1>,
+                                              std::projected<std::ranges::iterator_t<R2>, Proj2>>
+                  Comp = ranges::less>
+    constexpr bool operator()(R1&& r1, R2&& r2, Comp comp = {}, Proj1 proj1 = {}, Proj2 proj2 = {}) const {
+        return (*this)(std::ranges::begin(r1), std::ranges::end(r1), std::ranges::begin(r2), std::ranges::end(r2),
+                       std::ref(comp), std::ref(proj1), std::ref(proj2));
+    }
+};
+
+inline constexpr auto bsearch_includes = bsearch_includes_fn{};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 void AocMain(std::string_view input);

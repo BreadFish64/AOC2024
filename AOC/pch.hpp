@@ -487,7 +487,7 @@ extern Logger logger;
 template <typename Ratio = std::milli>
 struct StopWatch {
 #ifdef WIN32
-    using Clock = TscClock;
+    using Clock = std::chrono::steady_clock;
 #else
     using Clock = std::chrono::steady_clock;
 #endif

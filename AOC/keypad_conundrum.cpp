@@ -1,15 +1,4 @@
 namespace {
-[[maybe_unused]] constexpr std::string_view test = R"(029A
-980A
-179A
-456A
-379A
-)";
-
-// <Av<A>>^A
-// v<<A>>^Av<A<A>>^AvA^AA
-//
-// v<<A>^A>A
 
 constexpr std::array<Pos2D, 128> DIGIT_TO_POS = [] {
     std::array<Pos2D, 128> init{};
@@ -37,134 +26,118 @@ constexpr std::array<Pos2D, 128> ARROW_TO_POS = [] {
 
     init['<'] = {1, 0};
     init['v'] = {1, 1};
-    init['V'] = {1, 1};
     init['>'] = {1, 2};
+
     return init;
 }();
 
-std::string TransformDigits(std::string_view in) {
-    std::string out;
-    Pos2D robot{DIGIT_TO_POS['A']};
-    for (const char target : in) {
-        const Pos2D targetPos{DIGIT_TO_POS[target]};
-
-        const auto MoveRight = [&] {
-            while (robot.x() < targetPos.x()) {
-                out.push_back('>');
-                ++robot.x();
-            }
-        };
-        const auto MoveLeft = [&] {
-            while (robot.x() > targetPos.x()) {
-                out.push_back('<');
-                --robot.x();
-            }
-        };
-        const auto MoveUp = [&] {
-            while (robot.y() > targetPos.y()) {
-                out.push_back('^');
-                --robot.y();
-            }
-        };
-        const auto MoveDown = [&] {
-            while (robot.y() < targetPos.y()) {
-                out.push_back('v');
-                ++robot.y();
-            }
-        };
-
-        if (robot.y() == 3 && targetPos.x() == 0) {
-            MoveUp();
-            MoveLeft();
-        } else if (robot.x() == 0 && targetPos.y() == 3) {
-            MoveRight();
-            MoveDown();
-        } else if (robot.y() > targetPos.y()) {
-            if (robot.x() > targetPos.x()) {
-                MoveLeft();
-                MoveUp();
-            } else {
-                MoveUp();
-                MoveRight();
-            }
-        } else {
-            if (robot.x() > targetPos.x()) {
-                MoveLeft();
-                MoveDown();
-            } else {
-                MoveRight();
-                MoveDown();
-            }
-        }
-        out.push_back('A');
+void MoveY(std::string& out, Pos2D robotPos, Pos2D targetPos) {
+    if (robotPos.y() > targetPos.y()) {
+        out.insert(out.end(), robotPos.y() - targetPos.y(), '^');
+    } else {
+        out.insert(out.end(), targetPos.y() - robotPos.y(), 'v');
     }
+}
+
+void MoveX(std::string& out, Pos2D robotPos, Pos2D targetPos) {
+    if (robotPos.x() > targetPos.x()) {
+        out.insert(out.end(), robotPos.x() - targetPos.x(), '<');
+    } else {
+        out.insert(out.end(), targetPos.x() - robotPos.x(), '>');
+    }
+}
+
+std::string MoveYX(Pos2D robotPos, Pos2D targetPos) {
+    std::string out;
+    MoveY(out, robotPos, targetPos);
+    MoveX(out, robotPos, targetPos);
+    out.push_back('A');
     return out;
 }
 
-std::string TransformArrows(std::string_view in) {
+std::string MoveXY(Pos2D robotPos, Pos2D targetPos) {
     std::string out;
-    Pos2D robot{ARROW_TO_POS['A']};
-    for (const char target : in) {
-        const Pos2D targetPos{ARROW_TO_POS[target]};
-
-        auto MoveX = [&] {
-            while (robot.x() < targetPos.x()) {
-                out.push_back('>');
-                ++robot.x();
-            }
-            while (robot.x() > targetPos.x()) {
-                out.push_back('<');
-                --robot.x();
-            }
-        };
-        if (robot.y() > targetPos.y()) {
-            MoveX();
-            while (robot.y() > targetPos.y()) {
-                out.push_back('^');
-                --robot.y();
-            }
-        } else {
-            while (robot.y() < targetPos.y()) {
-                out.push_back('v');
-                ++robot.y();
-            }
-            MoveX();
-        }
-        out.push_back('A');
-    }
+    MoveX(out, robotPos, targetPos);
+    MoveY(out, robotPos, targetPos);
+    out.push_back('A');
     return out;
 }
 
-size_t Complexity(std::string_view input) {
-    const std::string first = TransformDigits(input);
-    logger.info("{}", first);
+struct Solver {
+    std::vector<boost::unordered_flat_map<std::pair<char, char>, size_t>> cache;
 
-    const std::string second = TransformArrows(first);
-    logger.info("{}", second);
+    Solver(size_t layers) : cache(layers + 1) {}
 
-    const std::string third = TransformArrows(second);
-    logger.info("{}", third);
+    size_t expandMove(char current, char next, size_t layer) {
+        if (auto cachedIt = cache[layer].find({current, next}); cachedIt != cache[layer].end()) {
+            return cachedIt->second;
+        }
+        auto calc = [&] {
+            if (layer == 0) {
+                // numpad
+                const Pos2D robotPos{DIGIT_TO_POS[current]};
+                const Pos2D targetPos{DIGIT_TO_POS[next]};
+                if (robotPos.x() == 0 && targetPos.y() == 3) {
+                    return expandedLen(MoveXY(robotPos, targetPos), layer + 1);
+                } else if (robotPos.y() == 3 && targetPos.x() == 0) {
+                    return expandedLen(MoveYX(robotPos, targetPos), layer + 1);
+                } else {
+                    size_t lenYX = expandedLen(MoveYX(robotPos, targetPos), layer + 1);
+                    size_t lenXY = expandedLen(MoveXY(robotPos, targetPos), layer + 1);
+                    return std::min(lenYX, lenXY);
+                }
+            } else {
+                // arrow pad
+                const Pos2D robotPos{ARROW_TO_POS[current]};
+                const Pos2D targetPos{ARROW_TO_POS[next]};
+                if (robotPos.x() == 0 && targetPos.y() == 0) {
+                    return expandedLen(MoveXY(robotPos, targetPos), layer + 1);
+                } else if (robotPos.y() == 0 && targetPos.x() == 0) {
+                    return expandedLen(MoveYX(robotPos, targetPos), layer + 1);
+                } else {
+                    size_t lenYX = expandedLen(MoveYX(robotPos, targetPos), layer + 1);
+                    size_t lenXY = expandedLen(MoveXY(robotPos, targetPos), layer + 1);
+                    return std::min(lenYX, lenXY);
+                }
+            }
+        };
+        return cache[layer][{current, next}] = calc();
+    }
 
-    size_t complexity{third.length() * ParseNumber<size_t>(input.substr(0, input.size() - 1))};
-    logger.info("{}", complexity);
+    size_t expandedLen(std::string_view input, size_t layer) {
+        if (layer == cache.size()) {
+            return input.size();
+        } else {
+            size_t len{0};
+            char current{'A'};
+            for (char next : input) {
+                len += expandMove(current, next, layer);
+                current = next;
+            }
+            return len;
+        }
+    }
 
-    return complexity;
-}
+    size_t complexity(std::string_view input) {
+        size_t num        = ParseNumber<size_t>(input.substr(0, input.size() - 1));
+        size_t minLen     = expandedLen(input, 0);
+        size_t complexity = minLen * num;
+        logger.info("{}: {} * {} = {}", input, minLen, num, complexity);
+        return complexity;
+    }
+
+    size_t complexitySum(auto&& codes) {
+        return ranges::accumulate(codes, size_t{}, std::plus{},
+                                  [this](std::string_view code) { return complexity(code); });
+    }
+};
 
 } // namespace
 
 void AocMain(std::string_view input) {
-    //input = test;
-
-    // 161468
-    // too high
-
-    // 379A
-    // <v<A>>^AvA^A<vA<AA>>^AAvA<^A>AAvA^A<vA>^AA<A>A<v<A>A>^AAAvA<^A>A
-    // v<<A>>^AvA^Av<<A>>^AAv<A<A>>^AAvAA<^A>Av<A>^AA<A>Av<A<A>>^AAAvA<^A>A
-
-    logger.solution("{}", ranges::accumulate(input | Split('\n'), size_t{}, std::plus{}, Complexity));
-
-    logger.info("{}", TransformArrows("vA<A>^A"));
-    logger.info("{}", TransformArrows("v<A>A^A"));
+    auto codes = input | Split('\n');
+    logger.solution("Part 1: {}",
+                    StopWatch<std::micro>::Run("2 layers", [&codes] { return Solver{2}.complexitySum(codes); }));
+    logger.solution("Part 2: {}",
+                    StopWatch<std::micro>::Run("25 layers", [&codes] { return Solver{25}.complexitySum(codes); }));
 }

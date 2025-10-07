@@ -26,7 +26,7 @@ FileMap Parse(std::string_view input) {
     fileMap.add(fileMap.end(), {FileInterval{0, back}, 0});
     size_t fileCount{1};
     for (auto range : input | views::drop(1) | views::transform([](char c) { return static_cast<size_t>(c - '0'); }) |
-                          std::views::chunk(2)) {
+                          ranges::views::chunk(2)) {
         size_t front = back + range[0];
         back         = front + range[1];
         fileMap.add(fileMap.end(), {FileInterval{front, back}, fileCount++});

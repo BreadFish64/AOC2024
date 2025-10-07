@@ -33,13 +33,13 @@ Logger::Logger() {
 }
 
 void Logger::flush() {
-    std::vector<TypeErasedLogLine> flushedLines;
+    std::vector<std::unique_ptr<LogLineBase>> flushedLines;
     {
         const std::lock_guard logLinesLock{logLinesMutex};
         logLines.swap(flushedLines);
     }
     for (const auto& logLine : flushedLines) {
-        logLine();
+        (*logLine)();
     }
 }
 

@@ -37,14 +37,14 @@ struct Maze {
 
         for (int32_t y{0}; y < inputMaze.extent(0); ++y) {
             for (int32_t x{0}; x < inputMaze.extent(1); ++x) {
-                MazeCell& cell{grid(y, x)};
-                cell.forward.fill((inputMaze(y, x) == '#') ? -1 : std::numeric_limits<Score>::max());
+                MazeCell& cell{grid[y, x]};
+                cell.forward.fill((inputMaze[y, x] == '#') ? -1 : std::numeric_limits<Score>::max());
             }
         }
     }
 
     Score explore(const Pos2D pos, const Score currentScore, const uint8_t direction) {
-        MazeCell& cell{grid.to_mdspan()(pos)};
+        MazeCell& cell{grid.to_mdspan()[pos]};
         if (cell.forward[direction] < currentScore) {
             return std::numeric_limits<Score>::max();
         }
@@ -64,14 +64,14 @@ struct Maze {
 
     void explore() { explore(startPos, 0, RIGHT); }
 
-    Score getEndScore() const noexcept { return grid.to_mdspan()(endPos).back; }
+    Score getEndScore() const noexcept { return grid.to_mdspan()[endPos].back; }
 
     size_t countBestPathCells() const noexcept {
         const Score lowestScore{getEndScore()};
         size_t count{0};
         for (int32_t y{0}; y < grid.extent(0); ++y) {
             for (int32_t x{0}; x < grid.extent(1); ++x) {
-                count += grid(y, x).back == lowestScore;
+                count += grid[y, x].back == lowestScore;
             }
         }
         return count;

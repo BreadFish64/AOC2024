@@ -1,3 +1,4 @@
+#include "Mdspan.hpp"
 namespace {
 
 [[maybe_unused]] constexpr std::string_view test = R"(p=0,4 v=3,-3
@@ -15,8 +16,8 @@ p=9,5 v=-3,-3
 )";
 
 struct Robot {
-    Index2D position;
-    Index2D velocity;
+    Pos2D position;
+    Vec2D velocity;
 
     Robot(std::string_view line) {
         size_t numberStart = 2;
@@ -36,7 +37,7 @@ struct Robot {
 } // namespace
 
 void AocMain(std::string_view input) {
-    Index2D dims{101, 103};
+    Pos2D dims{101, 103};
 #if false
     input = test;
     dims  = Index2D{11, 7};
@@ -50,7 +51,7 @@ void AocMain(std::string_view input) {
     auto robots = input | Split('\n') | views::transform(Constructor<Robot>{}) | ranges::to_vector;
     std::array<size_t, 4> quadrantCounts{};
     for (const Robot& robot : robots) {
-        Index2D endPosition = (robot.position + robot.velocity * 100);
+        Pos2D endPosition = (robot.position + robot.velocity * 100);
         endPosition.x() %= dims.x();
         if (endPosition.x() < 0) endPosition.x() += dims.x();
         endPosition.y() %= dims.y();
@@ -74,7 +75,7 @@ void AocMain(std::string_view input) {
         mdspan treeGrid(treeStorage.data(), layout_left_padded<dynamic_extent>::mapping<dextents<int32_t, 2>>(
                                                 dextents<int32_t, 2>(dims.x(), dims.y()), dims.x() + 1));
         for (const Robot& robot : robots) {
-            char& cell{treeGrid(robot.position)};
+            char& cell{treeGrid[robot.position]};
             if (cell == ' ') {
                 cell = '1';
             } else {

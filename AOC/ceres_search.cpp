@@ -4,7 +4,7 @@ template <int32_t yInc, int32_t xInc>
 bool CheckMatch(const InputGrid<const char> grid, int32_t y, int32_t x) {
     const auto CheckLetters = [&](auto... letter) {
         bool pass{true};
-        ((pass &= (grid(y, x) == letter), y += yInc, x += xInc), ...);
+        ((pass &= (grid[y, x] == letter), y += yInc, x += xInc), ...);
         return pass;
     };
     return CheckLetters('X', 'M', 'A', 'S');
@@ -42,11 +42,11 @@ size_t Part2(const InputGrid<const char> grid) {
     size_t count{0};
     for (int32_t y = 1; y < grid.extent(1) - 1; ++y) {
         for (int32_t x = 1; x < grid.extent(0) - 1; ++x) {
-            const char cc    = grid(y, x);
-            const char tl    = grid(y - 1, x - 1);
-            const char tr    = grid(y - 1, x + 1);
-            const char bl    = grid(y + 1, x - 1);
-            const char br    = grid(y + 1, x + 1);
+            const char cc    = grid[y, x];
+            const char tl    = grid[y - 1, x - 1];
+            const char tr    = grid[y - 1, x + 1];
+            const char bl    = grid[y + 1, x - 1];
+            const char br    = grid[y + 1, x + 1];
             const int mCount = countEq('M', tl, tr, bl, br);
             const int sCount = countEq('S', tl, tr, bl, br);
             if (cc == 'A' && tl == br && mCount == 2 && sCount == 2) {

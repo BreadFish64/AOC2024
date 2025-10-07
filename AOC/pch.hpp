@@ -19,13 +19,16 @@
 #include <memory_resource>
 #include <numeric>
 #include <optional>
+#include <print>
 #include <ranges>
+#include <semaphore>
 #include <set>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <thread>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 
@@ -35,7 +38,6 @@
 #include <boost/container/flat_set.hpp>
 #include <boost/container/small_vector.hpp>
 #include <boost/container/static_vector.hpp>
-#include <boost/multiprecision/cpp_int.hpp>
 #include <boost/unordered/unordered_flat_map.hpp>
 #include <boost/unordered/unordered_flat_set.hpp>
 
@@ -43,19 +45,15 @@
 #include "Fnv.hpp"
 #include "Mdspan.hpp"
 #include "TscClock.hpp"
+#include "semaphore_mutex.hpp"
 
 #undef IN
 
 using namespace std::literals;
 namespace views = ranges::views;
 
-#if defined(__GNUC__) || defined(__clang__)
 using int128_t  = signed __int128;
 using uint128_t = unsigned __int128;
-#else
-using int128_t  = boost::multiprecision::int128_t;
-using uint128_t = boost::multiprecision::uint128_t;
-#endif
 
 constexpr std::int64_t operator""_int64_t(unsigned long long x) {
     return static_cast<std::int64_t>(x);
@@ -408,57 +406,71 @@ concept TupleLike = requires {
 };
 
 class Logger {
-    using TypeErasedLogLine = std::move_only_function<void() const>;
-
     template <typename T>
-    static auto CopyRange(T&& obj) {
+    static decltype(auto) CopyRange(T&& obj) {
         using Value = std::remove_cvref_t<T>;
         if constexpr (std::convertible_to<T, std::string>) {
             return std::string(std::forward<T>(obj));
         } else if constexpr (ranges::range<T>) {
-            using Element = ranges::value_type_t<T>;
+            using Element = std::ranges::range_value_t<T>;
             if constexpr (std::same_as<char, Element>) {
-                return std::string(ranges::begin(obj), ranges::end(obj));
+                return std::string(std::ranges::begin(obj), std::ranges::end(obj));
             } /*else if constexpr (TupleLike<Value>) {
                 return boost::container::static_vector<Element, std::tuple_size_v<Value>>(ranges::begin(obj),
                                                                                           ranges::end(obj));
             }*/
             else {
-                return boost::container::small_vector<Element, 256 / sizeof(Element)>(ranges::begin(obj),
-                                                                                      ranges::end(obj));
+                return boost::container::small_vector<Element, 256 / sizeof(Element)>(std::ranges::begin(obj),
+                                                                                      std::ranges::end(obj));
             }
         } else {
             return std::forward<T>(obj);
         }
     }
+    template <class Arg>
+    using StoredArg = std::decay_t<decltype(CopyRange(std::declval<Arg>()))>;
 
-    template <typename... Args>
-    struct LogLine {
-        std::string storedStyle;
-        std::string_view storedFmt;
-        std::tuple<decltype(CopyRange(std::declval<Args>()))...> storedArgs;
+    struct LogLineBase {
+        virtual ~LogLineBase() = default;
 
-        explicit LogLine(std::string style, std::format_string<Args...> fmt, Args&&... args)
-            : storedStyle{std::move(style)}, storedFmt{fmt.get()},
-              storedArgs{std::make_tuple(CopyRange(std::forward<Args>(args))...)} {}
-
-        void operator()() const {
-            std::fwrite(storedStyle.data(), sizeof(char), storedStyle.size(), stdout);
-            auto printArgs = [this](const auto&... unpackedArgs) {
-                std::vformat_to(std::ostreambuf_iterator{std::cout}, storedFmt, std::make_format_args(unpackedArgs...));
-            };
-            std::apply(printArgs, storedArgs);
-            constexpr std::string_view resetAndNewline{"\x1b[0m\n"};
-            std::fwrite(resetAndNewline.data(), sizeof(char), resetAndNewline.size(), stdout);
-        }
+        virtual void operator()() const = 0;
     };
-    std::mutex logLinesMutex;
-    std::vector<TypeErasedLogLine> logLines;
 
     template <typename... Args>
-    void addLogline(std::string style, std::format_string<Args...> fmt, Args&&... args) {
+    struct LogLine : LogLineBase {
+
+        template <typename... CtorArgs>
+        explicit LogLine(std::string_view style, std::string_view fmt, CtorArgs&&... args)
+            : storedStyle_{style}, storedFmt_{fmt}, storedArgs_{std::forward<CtorArgs>(args)...} {}
+
+        void operator()() const final {
+            thread_local std::string formatBuffer;
+
+            formatBuffer.clear();
+            formatBuffer.insert_range(formatBuffer.end(), storedStyle_);
+            const auto printArgs = [&](const auto&... unpackedArgs) {
+                std::vformat_to(std::back_inserter(formatBuffer), storedFmt_, std::make_format_args(unpackedArgs...));
+            };
+            std::apply(printArgs, storedArgs_);
+            constexpr std::string_view resetAndNewline{"\x1b[0m\n"};
+            formatBuffer.insert_range(formatBuffer.end(), resetAndNewline);
+
+            std::fwrite(formatBuffer.data(), sizeof(char), formatBuffer.size(), stdout);
+        }
+
+    private:
+        std::string_view storedStyle_;
+        std::string_view storedFmt_;
+        std::tuple<Args...> storedArgs_;
+    };
+    std::vector<std::unique_ptr<LogLineBase>> logLines;
+    AOC::SemaphoreMutex logLinesMutex;
+
+    template <typename... Args>
+    void addLogline(std::string_view style, std::string_view fmt, Args&&... args) {
         const std::lock_guard logLinesLock{logLinesMutex};
-        logLines.emplace_back(std::in_place_type<LogLine<Args...>>, std::move(style), fmt, std::forward<Args>(args)...);
+        using LogLineT = LogLine<StoredArg<Args>...>;
+        logLines.emplace_back(std::make_unique<LogLineT>(style, fmt, CopyRange(std::forward<Args>(args))...));
     }
 
 public:
@@ -467,18 +479,18 @@ public:
     void flush();
 
     template <typename... Args>
-    void info(std::format_string<Args...> fmt, Args&&... args) {
-        addLogline("", fmt, std::forward<Args>(args)...);
+    void info(std::format_string<StoredArg<Args>...> fmt, Args&&... args) {
+        addLogline("", fmt.get(), std::forward<Args>(args)...);
     }
 
     template <typename... Args>
-    void perf(std::format_string<Args...> fmt, Args&&... args) {
-        addLogline("\x1b[36m", fmt, std::forward<Args>(args)...);
+    void perf(std::format_string<StoredArg<Args>...> fmt, Args&&... args) {
+        addLogline("\x1b[36m", fmt.get(), std::forward<Args>(args)...);
     }
 
     template <typename... Args>
-    void solution(std::format_string<Args...> fmt, Args&&... args) {
-        addLogline("\x1b[92m", fmt, std::forward<Args>(args)...);
+    void solution(std::format_string<StoredArg<Args>...> fmt, Args&&... args) {
+        addLogline("\x1b[92m", fmt.get(), std::forward<Args>(args)...);
     }
 };
 
@@ -489,14 +501,17 @@ struct StopWatch {
 #ifdef WIN32
     using Clock = std::chrono::steady_clock;
 #else
-    using Clock = std::chrono::steady_clock;
+    using Clock = TscClock;
 #endif
     const std::string sectionName;
     const Clock::time_point start;
 
     explicit StopWatch(std::string sectionName) : sectionName{std::move(sectionName)}, start{Clock::now()} {}
 
-    ~StopWatch() {
+    StopWatch(const StopWatch&)            = delete;
+    StopWatch& operator=(const StopWatch&) = delete;
+
+    ~StopWatch() noexcept(false) {
         const Clock::time_point stop = Clock::now();
         logger.perf("{} took {}", sectionName, std::chrono::duration<double, Ratio>(stop - start));
     }
@@ -527,7 +542,7 @@ constexpr auto MultiFor(I... ends) {
     return ranges::views::cartesian_product(ranges::views::iota(I{}, ends)...);
 }
 template <typename R, typename T>
-constexpr auto PointerProject(R T::*member) {
+constexpr auto PointerProject(R T::* member) {
     return [member](T* p) {
         return std::invoke(member, *p);
     };
@@ -557,8 +572,10 @@ struct bsearch_includes_fn {
         for (; first2 != last2; ++first2) {
             first1 =
                 std::ranges::lower_bound(first1, last1, std::invoke(proj2, *first2), std::ref(comp), std::ref(proj1));
-            if (first1 == last1) return false;
-            if (std::invoke(comp, std::invoke(proj2, *first2), std::invoke(proj1, *first1))) return false;
+            if (first1 == last1) {
+                return false;
+            }
+            if (std::invoke(comp, std::invoke(proj2, *first2), std::invoke(proj1, *first1))) { return false; }
         }
         return true;
     }

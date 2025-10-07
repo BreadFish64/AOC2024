@@ -41,13 +41,13 @@ int32_t BFS(const std::span<const Pos2D> bytes, const int32_t gridDim) {
         dextents<int32_t, 2>{gridDim, gridDim}, std::pmr::polymorphic_allocator{&pool}};
     for (int32_t y{0}; y < memorySpace.extent(0); ++y) {
         for (int32_t x{0}; x < memorySpace.extent(1); ++x) {
-            memorySpace(y, x) = std::numeric_limits<int32_t>::max();
+            memorySpace[y, x] = std::numeric_limits<int32_t>::max();
         }
     }
     for (Pos2D byte : bytes) {
-        memorySpace(byte.y(), byte.x()) = -1;
+        memorySpace[byte.y(), byte.x()] = -1;
     }
-    const int32_t& result{memorySpace(gridDim - 1, gridDim - 1)};
+    const int32_t& result{memorySpace[gridDim - 1, gridDim - 1]};
 
     std::pmr::vector<Pos2D> edges{std::pmr::polymorphic_allocator{&pool}};
     edges.push_back({0, 0});
@@ -58,8 +58,8 @@ int32_t BFS(const std::span<const Pos2D> bytes, const int32_t gridDim) {
             for (Vec2D offset : {Vec2D{0, 1}, Vec2D{1, 0}, Vec2D{-1, 0}, Vec2D{0, -1}}) {
                 Pos2D nextEdge{edge + offset};
                 if (InBounds(memorySpace.extents(), nextEdge) &&
-                    memorySpace(nextEdge.y(), nextEdge.x()) == std::numeric_limits<int32_t>::max()) {
-                    memorySpace(nextEdge.y(), nextEdge.x()) = distance;
+                    memorySpace[nextEdge.y(), nextEdge.x()] == std::numeric_limits<int32_t>::max()) {
+                    memorySpace[nextEdge.y(), nextEdge.x()] = distance;
                     nextEdges.emplace_back(nextEdge);
                 }
             }

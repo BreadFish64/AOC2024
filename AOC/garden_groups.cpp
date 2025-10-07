@@ -1,4 +1,5 @@
 #include "Icl.hpp"
+#include "Mdspan.hpp"
 
 #include <boost/pool/pool_alloc.hpp>
 
@@ -38,8 +39,8 @@ public:
     size_t price1() const { return area * perimeter; }
     size_t price2() const { return area * countSides(); }
 
-    void crawl(const Index2D pos, const uint8_t direction) {
-        if (!InBounds(garden, pos) || garden(pos) != target) {
+    void crawl(const Pos2D pos, const uint8_t direction) {
+        if (!InBounds(garden, pos) || garden[pos] != target) {
             ++perimeter;
             if (direction & 1) {
                 sides[direction][pos.y() + 1] += pos.x();
@@ -48,14 +49,14 @@ public:
             }
             return;
         }
-        if (std::exchange(isCrawled(pos), true)) {
+        if (std::exchange(isCrawled[pos], true)) {
             return;
         }
         ++area;
-        crawl(pos + Index2D{-1, 0}, 0);
-        crawl(pos + Index2D{0, -1}, 1);
-        crawl(pos + Index2D{1, 0}, 2);
-        crawl(pos + Index2D{0, 1}, 3);
+        crawl(pos + Vec2D{-1, 0}, 0);
+        crawl(pos + Vec2D{0, -1}, 1);
+        crawl(pos + Vec2D{1, 0}, 2);
+        crawl(pos + Vec2D{0, 1}, 3);
     }
 };
 
@@ -69,10 +70,10 @@ void AocMain(std::string_view input) {
     size_t totalPrice2{0};
     for (int32_t y = 0; y < garden.extent(0); ++y) {
         for (int32_t x = 0; x < garden.extent(1); ++x) {
-            if (isCrawled(y, x)) {
+            if (isCrawled[y, x]) {
                 continue;
             }
-            PlantCrawler crawler{garden, isCrawled, garden(y, x)};
+            PlantCrawler crawler{garden, isCrawled, garden[y, x]};
             crawler.crawl({y, x}, false);
             totalPrice1 += crawler.price1();
             totalPrice2 += crawler.price2();

@@ -9,13 +9,14 @@ auto Parse(std::string_view input) {
 bool ReportIsSafe(auto&& report) {
     bool increasing = true;
     bool decreasing = true;
-    bool gradual    = ranges::all_of(
-        report | std::ranges::views::pairwise_transform([&increasing, &decreasing](int32_t lhs, int32_t rhs) -> bool {
-            increasing &= rhs > lhs;
-            decreasing &= lhs > rhs;
-            return std::abs(rhs - lhs) <= 3;
-        }),
-        std::identity{});
+    bool gradual    = ranges::all_of(ranges::views::zip(report, report | ranges::views::drop(1)) |
+                                         std::ranges::views::transform([&increasing, &decreasing](auto&& e) -> bool {
+                                          auto [lhs, rhs] = e;
+                                          increasing &= rhs > lhs;
+                                          decreasing &= lhs > rhs;
+                                          return std::abs(rhs - lhs) <= 3;
+                                      }),
+                                     std::identity{});
     return (increasing ^ decreasing) && gradual;
 }
 

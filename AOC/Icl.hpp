@@ -1,5 +1,9 @@
 #pragma once
 
+#include <boost/container/flat_set.hpp>
+#include <boost/container/flat_map.hpp>
+#include <boost/container/small_vector.hpp>
+
 #define ICL_USE_AOC_IMPLEMENTATION
 namespace AocIcl {
 template <typename Key, typename Compare, typename Allocator>
@@ -13,8 +17,6 @@ using map = boost::container::flat_map<Key, T, Compare, Allocator>;
 
 template <class T>
 struct std::formatter<boost::icl::right_open_interval<T>> : std::formatter<T> {
-    // parse is inherited from formatter<string_view>.
-
     auto format(boost::icl::right_open_interval<T> interval, format_context& ctx) const {
         auto it = ctx.out();
         *it++   = '[';
@@ -29,8 +31,6 @@ struct std::formatter<boost::icl::right_open_interval<T>> : std::formatter<T> {
 
 template <class T>
 struct std::formatter<boost::icl::closed_interval<T>> : std::formatter<T> {
-    // parse is inherited from formatter<string_view>.
-
     auto format(boost::icl::closed_interval<T> interval, format_context& ctx) const {
         auto it = ctx.out();
         *it++   = '[';

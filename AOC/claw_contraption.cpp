@@ -1,3 +1,5 @@
+#include <Eigen/Dense>
+
 namespace {
 
 [[maybe_unused]] constexpr std::string_view test = R"(Button A: X+94, Y+34

@@ -39,6 +39,65 @@ struct ZYX {
 template <class IndexType, size_t Rank>
 struct Vec : std::array<IndexType, Rank>, ZYX {
     using Base = std::array<IndexType, Rank>;
+
+    [[attr_forceinline]] constexpr Vec& operator+=(IndexType scalar) noexcept {
+        for (IndexType& posE : *this) {
+            posE += scalar;
+        }
+        return *this;
+    }
+    [[attr_forceinline]] constexpr Vec& operator-=(IndexType scalar) noexcept {
+        for (IndexType& posE : *this) {
+            posE -= scalar;
+        }
+        return *this;
+    }
+    [[attr_forceinline]] constexpr Vec& operator*=(IndexType scalar) noexcept {
+        for (IndexType& posE : *this) {
+            posE *= scalar;
+        }
+        return *this;
+    }
+    [[attr_forceinline]] constexpr Vec& operator/=(IndexType scalar) noexcept {
+        for (IndexType& posE : *this) {
+            posE /= scalar;
+        }
+        return *this;
+    }
+
+    [[nodiscard, attr_forceinline]] constexpr Vec operator+(IndexType scalar) const noexcept {
+        Vec result{*this};
+        result += scalar;
+        return result;
+    }
+    [[nodiscard, attr_forceinline]] constexpr Vec operator-(IndexType scalar) const noexcept {
+        Vec result{*this};
+        result -= scalar;
+        return result;
+    }
+    [[nodiscard, attr_forceinline]] constexpr Vec operator*(IndexType scalar) const noexcept {
+        Vec result{*this};
+        result *= scalar;
+        return result;
+    }
+    [[nodiscard, attr_forceinline]] constexpr Vec operator/(IndexType scalar) const noexcept {
+        Vec result{*this};
+        result /= scalar;
+        return result;
+    }
+
+    [[attr_forceinline]] constexpr Vec& operator+=(const Vec<IndexType, Rank>& vec) noexcept {
+        for (size_t r{0}; r < Rank; ++r) {
+            (*this)[r] += vec[r];
+        }
+        return *this;
+    }
+    [[attr_forceinline]] constexpr Vec& operator-=(const Vec<IndexType, Rank>& vec) noexcept {
+        for (size_t r{0}; r < Rank; ++r) {
+            (*this)[r] -= vec[r];
+        }
+        return *this;
+    }
 };
 
 template <class IndexType, size_t Rank>
@@ -49,7 +108,7 @@ struct Pos : std::array<IndexType, Rank>, ZYX {
     // Pos(const extents<IndexType, Extents...>& extents) noexcept : Base{} {
     // }
 
-    [[attr_forceinline]]  constexpr Pos& operator+=(IndexType scalar) noexcept {
+    [[attr_forceinline]] constexpr Pos& operator+=(IndexType scalar) noexcept {
         for (IndexType& posE : *this) {
             posE += scalar;
         }
@@ -78,15 +137,23 @@ struct Pos : std::array<IndexType, Rank>, ZYX {
 
 template <class IndexType, size_t Rank>
 [[nodiscard, attr_forceinline]] constexpr Pos<IndexType, Rank> operator+(const Pos<IndexType, Rank>& lhs,
-                                                       const Vec<IndexType, Rank>& rhs) noexcept {
+                                                                         const Vec<IndexType, Rank>& rhs) noexcept {
     Pos<IndexType, Rank> result{lhs};
     result += rhs;
     return result;
 }
 
 template <class IndexType, size_t Rank>
+[[nodiscard, attr_forceinline]] constexpr Pos<IndexType, Rank> operator-(const Pos<IndexType, Rank>& lhs,
+                                                                         const Vec<IndexType, Rank>& rhs) noexcept {
+    Pos<IndexType, Rank> result{lhs};
+    result -= rhs;
+    return result;
+}
+
+template <class IndexType, size_t Rank>
 [[nodiscard, attr_forceinline]] constexpr Vec<IndexType, Rank> operator-(const Pos<IndexType, Rank>& lhs,
-                                                        const Pos<IndexType, Rank>& rhs) noexcept {
+                                                                         const Pos<IndexType, Rank>& rhs) noexcept {
     Vec<IndexType, Rank> result;
     for (size_t r{0}; r < Rank; ++r) {
         result[r] = lhs[r] - rhs[r];
@@ -95,8 +162,14 @@ template <class IndexType, size_t Rank>
 }
 
 template <class IndexType, size_t Rank>
-[[nodiscard, attr_forceinline]] constexpr bool operator<(const Pos<IndexType, Rank>& lhs, const Pos<IndexType, Rank>& rhs) noexcept {
-    return std::ranges::fold_left(std::views::zip_transform(std::less{}, lhs, rhs), true, std::bit_and{});
+[[nodiscard, attr_forceinline]] constexpr bool operator<(const Pos<IndexType, Rank>& lhs,
+                                                         const Pos<IndexType, Rank>& rhs) noexcept {
+    for (auto [l, r] : std::views::zip(lhs, rhs)) {
+        if (!(lhs < rhs)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 template <class IndexType, std::size_t Rank>
@@ -192,9 +265,15 @@ template <std::size_t I, typename IndexType, std::size_t Rank>
     return arr[I];
 };
 
-template <class IndexType, size_t... Extents>
-constexpr bool InBounds(const extents<IndexType, Extents...>& extents, const Pos<IndexType, sizeof...(Extents)>& pos) {
-    for (size_t r{0}; r < sizeof...(Extents); ++r) {
+template <class MultiDim>
+concept HasExtents = requires(const MultiDim& thing, MultiDim::rank_type rank) {
+    { thing.extent(rank) } -> std::same_as<typename MultiDim::index_type>;
+    { MultiDim::rank() } -> std::same_as<typename MultiDim::rank_type>;
+};
+
+template <HasExtents MultiDim>
+constexpr bool InBounds(const MultiDim& extents, const Pos<typename MultiDim::index_type, MultiDim::rank()>& pos) {
+    for (typename MultiDim::rank_type r{0}; r < MultiDim::rank(); ++r) {
         if (pos[r] < 0 || pos[r] >= extents.extent(r)) {
             return false;
         }

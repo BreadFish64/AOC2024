@@ -101,6 +101,8 @@ struct State {
             WireId id{line[0], line[1], line[2]};
             wires.emplace(id, Wire{
                                   .id   = id,
+                                  .lhs = {},
+                                  .rhs = {},
                                   .gate = Gate::IN,
                                   .high = line[5] != '0',
                               });
@@ -147,8 +149,8 @@ struct State {
                 }
 
                 switch (wire.gate) {
-                    case Gate::AND: wire.high = *lhs.high & *rhs.high; break;
-                    case Gate::OR: wire.high = *lhs.high | *rhs.high; break;
+                    case Gate::AND: wire.high = *lhs.high && *rhs.high; break;
+                    case Gate::OR: wire.high = *lhs.high || *rhs.high; break;
                     case Gate::XOR: wire.high = *lhs.high ^ *rhs.high; break;
                     default: std::unreachable();
                 }

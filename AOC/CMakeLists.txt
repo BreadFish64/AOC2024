@@ -1,36 +1,34 @@
-﻿find_package(range-v3      CONFIG REQUIRED)
-find_package(Boost         REQUIRED)
-find_package(Eigen3 3.3    REQUIRED NO_MODULE)
-
-if (MSVC)
-    set(EXTRA_FLAGS /utf-8 /W4 /WX /FA)
-else()
-    set(EXTRA_FLAGS -Wall -Wextra -Werror)
-endif()
-
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    list(APPEND EXTRA_FLAGS -Wno-missing-braces)
-endif()
-
 add_executable(MdspanTest
     MdspanTest.cpp
 )
 
-target_link_libraries(MdspanTest PRIVATE std::mdspan)
-target_compile_options(MdspanTest PRIVATE ${EXTRA_FLAGS})
+target_link_libraries(MdspanTest PRIVATE mdspan::mdspan)
+
+set(DO_PRECOMPILE TRUE)
 
 add_library(common_pch
     pch.cpp
     TscClock.cpp
 )
 target_include_directories(common_pch PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/override)
-target_link_libraries(common_pch PUBLIC range-v3 Boost::boost std::mdspan Eigen3::Eigen)
-target_compile_options(common_pch PUBLIC ${EXTRA_FLAGS})
-target_compile_definitions(common_pch PUBLIC MDSPAN_USE_BRACKET_OPERATOR=0)
-if (MSVC)
+target_link_libraries(common_pch PUBLIC
+    Boost::container
+    Boost::icl
+    Boost::pool
+    Boost::unordered
+
+    mdspan::mdspan
+    range-v3
+    Eigen3::Eigen
+    )
+if (WIN32)
     target_compile_definitions(common_pch PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
-target_precompile_headers(common_pch PUBLIC pch.hpp)
+if (${DO_PRECOMPILE})
+    target_precompile_headers(common_pch PUBLIC pch.hpp)
+else()
+    target_compile_options(common_pch PUBLIC --include=${CMAKE_CURRENT_SOURCE_DIR}/pch.hpp)
+endif()
 
 function(Problem problem_name)
 
@@ -38,9 +36,10 @@ add_executable(${problem_name}
     ${problem_name}.cpp
 )
 
-target_compile_options(${problem_name} PRIVATE ${EXTRA_FLAGS})
 target_link_libraries(${problem_name} PRIVATE common_pch)
-target_precompile_headers(${problem_name} REUSE_FROM common_pch)
+if (${DO_PRECOMPILE})
+  target_precompile_headers(${problem_name} REUSE_FROM common_pch)
+endif()
 
 set_target_properties(${problem_name}
     PROPERTIES

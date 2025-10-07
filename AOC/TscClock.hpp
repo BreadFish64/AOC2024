@@ -8,8 +8,6 @@
 #include <chrono>
 #include <concepts>
 
-#include <boost/rational.hpp>
-
 #ifdef _MSC_VER
 #include <intrin.h>
 #include <Windows.h>

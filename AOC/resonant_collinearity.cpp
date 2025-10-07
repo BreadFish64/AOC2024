@@ -1,35 +1,36 @@
+#include "Mdspan.hpp"
 void AocMain(std::string_view input) {
-    std::array<boost::container::small_vector<Index2D, 8>, 128> frequencies{};
+    std::array<boost::container::small_vector<Pos2D, 8>, 128> frequencies{};
     auto map = ToGrid(input);
-    for (int32_t y{0}; y < map.extent(0); ++y) {
-        for (int32_t x{0}; x < map.extent(1); ++x) {
-            char cell = map(y, x);
+    for (Pos2D pos{}; pos.y() < map.extent(0); ++pos.y()) {
+        for (pos.x() = 0; pos.x() < map.extent(1); ++pos.x()) {
+            char cell = map[pos];
             if (cell != '.') {
-                frequencies[cell].emplace_back(y, x);
+                frequencies[cell].emplace_back(pos);
             }
         }
     }
-    boost::unordered::unordered_flat_set<Index2D> antinodes1{};
-    boost::unordered::unordered_flat_set<Index2D> antinodes2{};
-    auto AddIfInBounds = [&](const Index2D& point) {
+    boost::unordered::unordered_flat_set<Pos2D> antinodes1{};
+    boost::unordered::unordered_flat_set<Pos2D> antinodes2{};
+    auto AddIfInBounds = [&](const Pos2D& point) {
         if (InBounds(map, point)) {
             antinodes1.emplace(point);
         }
     };
     for (const auto& antennae : frequencies) {
         for (auto p1it = antennae.begin(); p1it != antennae.end(); ++p1it) {
-            const Index2D& p1 = *p1it;
-            for (const Index2D& p2 : ranges::subrange(p1it + 1, antennae.end())) {
-                const Index2D distance = p2 - p1;
+            const Pos2D& p1 = *p1it;
+            for (const Pos2D& p2 : ranges::subrange(p1it + 1, antennae.end())) {
+                const Vec2D distance = p2 - p1;
                 // Part 1
                 AddIfInBounds(p1 - distance);
                 AddIfInBounds(p2 + distance);
                 // Part 2
-                const Index2D slope = distance; // / std::gcd(distance[0], distance[1]);
-                for (Index2D point = p1; InBounds(map, point); point -= slope) {
+                const Vec2D slope = distance; // / std::gcd(distance[0], distance[1]);
+                for (Pos2D point = p1; InBounds(map, point); point -= slope) {
                     antinodes2.emplace(point);
                 }
-                for (Index2D point = p1 + slope; InBounds(map, point); point += slope) {
+                for (Pos2D point = p1 + slope; InBounds(map, point); point += slope) {
                     antinodes2.emplace(point);
                 }
             }

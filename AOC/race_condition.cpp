@@ -20,7 +20,7 @@ struct Course {
 
         for (int32_t y{0}; y < course.extent(0); ++y) {
             for (int32_t x{0}; x < course.extent(1); ++x) {
-                course(y, x) = (inputGrid(y, x) == '#') ? -1 : std::numeric_limits<int32_t>::max();
+                course[y, x] = (inputGrid[y, x] == '#') ? -1 : std::numeric_limits<int32_t>::max();
             }
         }
     }
@@ -30,11 +30,11 @@ struct Course {
         int32_t distance{0};
         Pos2D pos{startPos};
         while (pos != endPos) {
-            course(pos) = distance;
+            course[pos] = distance;
             Pos2D nextPos{pos};
             for (Vec2D offset : {Vec2D{-1, 0}, Vec2D{0, -1}, Vec2D{0, 1}, Vec2D{1, 0}}) {
                 Pos2D offsetPos         = pos + offset;
-                const int32_t maybeNext = course(offsetPos);
+                const int32_t maybeNext = course[offsetPos];
                 if (maybeNext > distance) {
                     nextPos = offsetPos;
                 }
@@ -42,7 +42,7 @@ struct Course {
             pos = nextPos;
             ++distance;
         }
-        course(pos) = distance;
+        course[pos] = distance;
     }
 
     size_t cheatCount(int32_t minSkip, const int32_t radius) const {
@@ -50,7 +50,7 @@ struct Course {
         size_t count{0};
         for (int32_t y1{1}; y1 < course.extent(0) - 1; ++y1) {
             for (int32_t x1{1}; x1 < course.extent(1) - 1; ++x1) {
-                const int32_t start = course(y1, x1);
+                const int32_t start = course[y1, x1];
                 if (start < 0) {
                     continue;
                 }
@@ -60,7 +60,7 @@ struct Course {
                     for (int32_t x2 = std::max(0, x1 - xRadius); x2 <= std::min(x1 + xRadius, course.extent(1) - 1);
                          ++x2) {
                         const int32_t taxicab = yDist + std::abs(x2 - x1);
-                        const int32_t saved   = (course(y2, x2) - start) - taxicab;
+                        const int32_t saved   = (course[y2, x2] - start) - taxicab;
                         if (saved >= minSkip) {
                             ++count;
                         }

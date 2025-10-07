@@ -1,3 +1,4 @@
+#include "Mdspan.hpp"
 namespace {
 
 template <char box>
@@ -5,23 +6,23 @@ size_t GPSSum(const InputGrid<const char> warehouse) {
     size_t sum{0};
     for (int32_t y{1}; y < warehouse.extent(0) - 1; ++y) {
         for (int32_t x{1}; x < warehouse.extent(1) - 1; ++x) {
-            sum += (warehouse(y, x) == box) ? (100_size_t * y + x) : 0;
+            sum += (warehouse[y, x] == box) ? (100_size_t * y + x) : 0;
         }
     }
     return sum;
 }
 
-Index2D MoveRobotSimple(const InputGrid<char> warehouse, const Index2D direction, const Index2D robot) {
-    Index2D probe(robot + direction);
-    while (warehouse(probe) != '.') {
-        if (warehouse(probe) == '#') {
+Pos2D MoveRobotSimple(const InputGrid<char> warehouse, const Vec2D direction, const Pos2D robot) {
+    Pos2D probe{robot + direction};
+    while (warehouse[probe] != '.') {
+        if (warehouse[probe] == '#') {
             return robot;
         }
         probe += direction;
     }
-    while (!(probe == robot).all()) {
-        Index2D nextProbe{probe - direction};
-        std::swap(warehouse(probe), warehouse(nextProbe));
+    while (probe != robot) {
+        Pos2D nextProbe{probe - direction};
+        std::swap(warehouse[probe], warehouse[nextProbe]);
         probe = nextProbe;
     }
     return robot + direction;
@@ -29,8 +30,8 @@ Index2D MoveRobotSimple(const InputGrid<char> warehouse, const Index2D direction
 
 template <bool execute>
 bool MoveRobotWideImpl(const InputGrid<std::conditional_t<execute, char, const char>> warehouse,
-                           const Index2D direction, const Index2D position) {
-    const char cell{warehouse(position)};
+                           const Vec2D direction, const Pos2D position) {
+    const char cell{warehouse[position]};
     if (cell == '#') {
         if constexpr (execute) {
             std::unreachable();
@@ -39,13 +40,13 @@ bool MoveRobotWideImpl(const InputGrid<std::conditional_t<execute, char, const c
         }
     }
     if (cell == '.') return true;
-    Index2D left;
-    Index2D right;
+    Pos2D left;
+    Pos2D right;
     if (cell == '[') {
         left  = position;
-        right = position + Index2D{0, 1};
+        right = position + Vec2D{0, 1};
     } else if (cell == ']') {
-        left  = position + Index2D{0, -1};
+        left  = position + Vec2D{0, -1};
         right = position;
     } else {
         std::unreachable();
@@ -54,19 +55,19 @@ bool MoveRobotWideImpl(const InputGrid<std::conditional_t<execute, char, const c
                          MoveRobotWideImpl<execute>(warehouse, direction, right + direction);
     if constexpr (execute) {
         if (!canMove) std::unreachable();
-        std::swap(warehouse(left), warehouse(Index2D{left + direction}));
-        std::swap(warehouse(right), warehouse(Index2D{right + direction}));
+        std::swap(warehouse[left], warehouse[Pos2D{left + direction}]);
+        std::swap(warehouse[right], warehouse[Pos2D{right + direction}]);
     }
     return canMove;
 }
 
-Index2D MoveRobotWide(const InputGrid<char> warehouse, const Index2D direction, const Index2D robot) {
-    const Index2D nextRobotPos{robot + direction};
+Pos2D MoveRobotWide(const InputGrid<char> warehouse, const Vec2D direction, const Pos2D robot) {
+    const Pos2D nextRobotPos{robot + direction};
     if (!MoveRobotWideImpl<false>(warehouse, direction, nextRobotPos)) {
         return robot;
     }
     MoveRobotWideImpl<true>(warehouse, direction, nextRobotPos);
-    std::swap(warehouse(robot), warehouse(nextRobotPos));
+    std::swap(warehouse[robot], warehouse[nextRobotPos]);
     return nextRobotPos;
 }
 
@@ -96,7 +97,7 @@ size_t Simulate(const std::string_view input) {
     const mdspan warehouse{ToGrid(state)};
 
     const size_t initialRobotIndex = state.find('@');
-    Index2D robot{initialRobotIndex / warehouse.stride(0), initialRobotIndex % warehouse.stride(0)};
+    Pos2D robot{static_cast<int32_t>(initialRobotIndex / warehouse.stride(0)), static_cast<int32_t>(initialRobotIndex % warehouse.stride(0))};
 
     for (const char move : moves) {
         switch (move) {

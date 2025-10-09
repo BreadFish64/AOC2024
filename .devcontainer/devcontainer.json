@@ -1,0 +1,27 @@
+{
+    "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "llvm-vs-code-extensions.vscode-clangd",
+                "ms-vscode.cpptools-extension-pack",
+                "ms-python.python",
+                "charliermarsh.ruff"
+            ],
+            "settings": {
+                "[cpp]": {
+                    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+                },
+                "C_Cpp.intelliSenseEngine": "disabled",
+                "cmake.copyCompileCommands": "${workspaceFolder}/compile_commands.json",
+                "files.associations": {
+                    ".clang-format": "yaml",
+                    ".clang-tidy": "yaml"
+                }
+            }
+        }
+    }
+}

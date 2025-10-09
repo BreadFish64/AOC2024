@@ -1,4 +1,6 @@
 #include "Mdspan.hpp"
+#include <iostream>
+
 namespace {
 
 [[maybe_unused]] constexpr std::string_view test = R"(p=0,4 v=3,-3

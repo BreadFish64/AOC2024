@@ -17,7 +17,7 @@ class PlantCrawler {
     size_t area{0};
     size_t perimeter{0};
 
-    using SideSet  = boost::icl::interval_set<int32_t, std::less, boost::icl::closed_interval<int32_t>, PoolAlloc>;
+    using SideSet = boost::icl::interval_set<int32_t, std::less, boost::icl::closed_interval<int32_t>, PoolAlloc>;
     std::array<std::vector<SideSet>, 4> sides;
 
 public:

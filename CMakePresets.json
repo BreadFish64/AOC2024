@@ -6,15 +6,12 @@
       "hidden": true,
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/out/build/${presetName}",
-      "environment": {
-        "PATH": "$penv{PATH}${pathListSep}$env{CLANG_P2996_INSTALL_PREFIX}/bin"
-      },
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": true,
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_CXX_STANDARD_REQUIRED": true,
-        "CMAKE_C_COMPILER": "$env{CLANG_P2996_INSTALL_PREFIX}/bin/clang",
-        "CMAKE_CXX_COMPILER": "$env{CLANG_P2996_INSTALL_PREFIX}/bin/clang++",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_C_FLAGS": "-march=native -Wall -Wextra -Werror -Wno-missing-braces",
         "CMAKE_CXX_FLAGS": "-stdlib=libc++ -march=native -Wall -Wextra -Werror -Wno-missing-braces",
         "CMAKE_LINKER_TYPE": "LLD",
@@ -25,7 +22,7 @@
       "name": "clang-tidy-mixin",
       "hidden": true,
       "cacheVariables": {
-        "CMAKE_CXX_CLANG_TIDY": "$env{CLANG_P2996_INSTALL_PREFIX}/bin/clang-tidy;-p=${sourceDir}/out/build/${presetName}/"
+        "CMAKE_CXX_CLANG_TIDY": "clang-tidy;-p=${sourceDir}/out/build/${presetName}/"
       }
     },
     {

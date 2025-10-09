@@ -9,8 +9,8 @@ set(BOOST_ENABLE_CMAKE ON)
 FetchContent_Declare(
   Boost
   EXCLUDE_FROM_ALL YES
-  URL https://github.com/boostorg/boost/releases/download/boost-1.89.0/boost-1.89.0-cmake.7z
-  URL_HASH SHA256=252149f583054515b10688855b24ca1c16072b5118e603b8fe017894d319c262
+  URL https://github.com/boostorg/boost/releases/download/boost-1.89.0/boost-1.89.0-cmake.tar.xz
+  URL_HASH SHA256=67acec02d0d118b5de9eb441f5fb707b3a1cdd884be00ca24b9a73c995511f74
 )
 
 FetchContent_Declare(
